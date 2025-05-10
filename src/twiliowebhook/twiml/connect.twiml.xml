@@ -1,0 +1,7 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<Response>
+    <Say language="en-US" voice="Polly.Joanna">Hello. This is a helpful voice assistant.</Say>
+    <Pause length="1" />
+    <Say language="en-US" voice="Polly.Joanna">OK. you can start talking!</Say>
+    <Connect><Stream url="to-be-replaced"><Parameter name="From" value="to-be-replaced" /></Stream></Connect>
+</Response>

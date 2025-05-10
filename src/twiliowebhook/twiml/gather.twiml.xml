@@ -1,0 +1,12 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<Response>
+    <Say language="en-US" voice="Polly.Joanna">Hello. This is a call center.</Say>
+    <Pause length="1" />
+    <Gather numDigits="1" action="to-be-replaced" method="POST" timeout="15">
+        <Say language="en-US" voice="Polly.Joanna">Please press <emphasis level="strong">1</emphasis> to connect to the voice assistant.</Say>
+        <Pause length="1" />
+        <Say language="en-US" voice="Polly.Joanna">Please press <emphasis level="strong">2</emphasis> to connect to the operator.</Say>
+    </Gather>
+    <Say language="en-US" voice="Polly.Joanna">We didn't receive any input. Goodbye!</Say>
+    <Hangup/>
+</Response>

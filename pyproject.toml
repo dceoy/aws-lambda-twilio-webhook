@@ -7,12 +7,11 @@ package-mode = false
 python = "^3.13"
 aws-lambda-powertools = {extras = ["tracer"], version = "^3.4.1"}
 boto3 = "^1.36.2"
-
-[tool.poetry.group.twilio.dependencies]
 twilio = "^9.4.3"
+defusedxml = "^0.7.0"
+phonenumbers = "^9.0.0"
 
 [tool.poetry.group.dev.dependencies]
-twilio = "^9.4.3"
 ruff = "^0.11.0"
 pyright = "^1.1.379"
 pytest = "^8.3.2"
@@ -119,6 +118,9 @@ ignore = [
   "D102",     # undocumented-public-method
   "D103",     # undocumented-public-function
   "S101",     # assert
+  "S105",     # hardcoded-password-string
+  "S106",     # hardcoded-password-func-arg
+  "S405",     # suspicious-xml-etree-import
   "PLC2701",  # import-private-name
   "SLF001",   # private-member-access
   "ARG001",   # unused-function-argument
