@@ -5,7 +5,7 @@ import os
 from http import HTTPStatus
 from pathlib import Path
 from typing import Any
-from urllib.parse import parse_qsl, urlparse
+from urllib.parse import unquote, urlparse
 
 import phonenumbers
 from aws_lambda_powertools import Logger, Tracer
@@ -97,21 +97,19 @@ def transfer_call(country_code: str = "US") -> Response[str]:
             event=app.current_event,
         )
         logger.info("Call transfer")
-        root = parse_xml_and_extract_root(
-            xml_file_path=(
-                _CONNECT_TWIML_FILE_PATH if digits == "1" else _DIAL_TWIML_FILE_PATH
-            )
-        )
         if digits == "1":
+            root = parse_xml_and_extract_root(xml_file_path=_CONNECT_TWIML_FILE_PATH)
             caller_phone_number = _fetch_caller_phone_number_from_request(
                 event=app.current_event
             )
             stream = find_xml_element(root=root, namespaces="./Connect/Stream")
             stream.set("url", parameters[parameter_names["media-api-url"]])
-            for param in root.findall("./Connect/Stream/Parameter"):
-                if param.get("name") == "From":
-                    param.set("value", caller_phone_number)
+            parameter_from = find_xml_element(
+                root=stream, namespaces="./Parameter[@name='From']"
+            )
+            parameter_from.set("value", caller_phone_number)
         elif digits == "2":
+            root = parse_xml_and_extract_root(xml_file_path=_DIAL_TWIML_FILE_PATH)
             dial = find_xml_element(root=root, namespaces="./Dial")
             dial.text = phonenumbers.format_number(
                 phonenumbers.parse(
@@ -120,6 +118,8 @@ def transfer_call(country_code: str = "US") -> Response[str]:
                 ),
                 phonenumbers.PhoneNumberFormat.E164,
             )
+        else:
+            root = parse_xml_and_extract_root(xml_file_path=_HANGUP_TWIML_FILE_PATH)
         twiml = convert_xml_root_to_string(root=root, logger=logger)
     except (BadRequestError, UnauthorizedError) as e:
         logger.exception(e.msg)
@@ -214,9 +214,10 @@ def _respond_to_call(
     if twiml_file_path == _CONNECT_TWIML_FILE_PATH:
         stream = find_xml_element(root=root, namespaces="./Connect/Stream")
         stream.set("url", media_api_url)
-        for param in root.findall("./Connect/Stream/Parameter"):
-            if param.get("name") == "From":
-                param.set("value", caller_phone_number)
+        parameter_from = find_xml_element(
+            root=root, namespaces="./Connect/Stream/Parameter[@name='From']"
+        )
+        parameter_from.set("value", caller_phone_number)
     elif twiml_file_path == _GATHER_TWIML_FILE_PATH:
         gather = find_xml_element(root=root, namespaces="./Gather")
         webhook_api_fqdn = urlparse(webhook_api_url).netloc
@@ -243,9 +244,14 @@ def _fetch_caller_phone_number_from_request(event: LambdaFunctionUrlEvent) -> st
         BadRequestError: If the call number is not found in the request body.
 
     """
-    caller_phone_number = dict(
-        parse_qsl(event.decoded_body, keep_blank_values=True)
-    ).get("From")
+    caller_phone_number: str | None = None
+    if event.decoded_body:
+        for kv in event.decoded_body.split("&"):
+            if "=" in kv:
+                k, v = kv.split("=", 1)
+                if unquote(k) == "From":
+                    caller_phone_number = unquote(v)
+                    break
     logger.info("caller_phone_number: %s", caller_phone_number)
     if not caller_phone_number:
         error_message = "Call number not found in the request body"
