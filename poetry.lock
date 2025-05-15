@@ -1936,14 +1936,14 @@ files = [
 
 [[package]]
 name = "twilio"
-version = "9.6.0"
+version = "9.6.1"
 description = "Twilio API client and TwiML generator"
 optional = false
 python-versions = ">=3.7.0"
 groups = ["main", "dev"]
 files = [
-    {file = "twilio-9.6.0-py2.py3-none-any.whl", hash = "sha256:19e8554c56324186973dcb3121de34626755db15331767e3021a2e23f80c6a3b"},
-    {file = "twilio-9.6.0.tar.gz", hash = "sha256:bcb6cbc7f1dad09717d48d3e610573b6a55fa4a1f6fd1006f5b59cf6878b5562"},
+    {file = "twilio-9.6.1-py2.py3-none-any.whl", hash = "sha256:441fdab61b9a204eef770368380b962cbf08dc0fe9f757fe4b1d63ced37ddeed"},
+    {file = "twilio-9.6.1.tar.gz", hash = "sha256:bb80b31d4d9e55c33872efef7fb99373149ed4093f21c56cf582797da45862f5"},
 ]
 
 [package.dependencies]
@@ -2339,4 +2339,4 @@ propcache = ">=0.2.1"
 [metadata]
 lock-version = "2.1"
 python-versions = "^3.13"
-content-hash = "6de5ccb4db7db2152760f5a5084e6f2c9f77eadd146125d6f9e5cf434ed4eae4"
+content-hash = "e92926feca749a4a9a01272f4ed8aa497fdf12c45844e832679a746885cd8945"
