@@ -23,7 +23,7 @@ types-jmespath = "^1.0.2.20240106"
 types-requests = "^2.32.0.20250515"
 boto3-stubs = "^1.38.17"
 twilio-stubs = "^0.2.0"
-types-pygments = "^2.19.0.20250514"
+types-pygments = "^2.19.0.20250516"
 types-colorama = "^0.4.15.20240311"
 moto = "^5.0.27"
 
