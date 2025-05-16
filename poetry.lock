@@ -2028,14 +2028,14 @@ files = [
 
 [[package]]
 name = "types-pygments"
-version = "2.19.0.20250514"
+version = "2.19.0.20250516"
 description = "Typing stubs for Pygments"
 optional = false
 python-versions = ">=3.9"
 groups = ["dev"]
 files = [
-    {file = "types_pygments-2.19.0.20250514-py3-none-any.whl", hash = "sha256:81b60d109390b9a369cb253b099ef8b1826cf7c30ddca8ff2819a64a17193a7c"},
-    {file = "types_pygments-2.19.0.20250514.tar.gz", hash = "sha256:a39eafb8ce0df126455a2aeba4924e8dbb19c01c20ec159341d49b3ddc61844b"},
+    {file = "types_pygments-2.19.0.20250516-py3-none-any.whl", hash = "sha256:db27de8b59591389cd7d14792483892c021c73b8389ef55fef40a48aa371fbcc"},
+    {file = "types_pygments-2.19.0.20250516.tar.gz", hash = "sha256:b53fd07e197f0e7be38ee19598bd99c78be5ca5f9940849c843be74a2f81ab58"},
 ]
 
 [package.dependencies]
@@ -2339,4 +2339,4 @@ propcache = ">=0.2.1"
 [metadata]
 lock-version = "2.1"
 python-versions = "^3.13"
-content-hash = "718174da6c838927fa08cba7350c059336213c2ce6abba0d30e28cc492e8f2be"
+content-hash = "7c41501c614042ca8f25dceeedfbe81112cefc39bf28c8dd43efc0b0d6ada9c3"
