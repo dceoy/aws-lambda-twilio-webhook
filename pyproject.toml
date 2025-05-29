@@ -6,7 +6,7 @@ package-mode = false
 [tool.poetry.dependencies]
 python = "^3.13"
 aws-lambda-powertools = {extras = ["tracer"], version = "^3.13.0"}
-boto3 = "^1.38.24"
+boto3 = "^1.38.25"
 twilio = "^9.6.1"
 defusedxml = "^0.7.0"
 phonenumbers = "^9.0.6"
