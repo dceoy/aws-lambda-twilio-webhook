@@ -2016,14 +2016,14 @@ files = [
 
 [[package]]
 name = "types-jmespath"
-version = "1.0.2.20240106"
+version = "1.0.2.20250529"
 description = "Typing stubs for jmespath"
 optional = false
-python-versions = ">=3.8"
+python-versions = ">=3.9"
 groups = ["dev"]
 files = [
-    {file = "types-jmespath-1.0.2.20240106.tar.gz", hash = "sha256:b4a65a116bfc1c700a4fd9d24e2e397f4a431122e0320a77b7f1989a6b5d819e"},
-    {file = "types_jmespath-1.0.2.20240106-py3-none-any.whl", hash = "sha256:c3e715fcaae9e5f8d74e14328fdedc4f2b3f0e18df17f3e457ae0a18e245bde0"},
+    {file = "types_jmespath-1.0.2.20250529-py3-none-any.whl", hash = "sha256:6344c102233aae954d623d285618079d797884e35f6cd8d2a894ca02640eca07"},
+    {file = "types_jmespath-1.0.2.20250529.tar.gz", hash = "sha256:d3c08397f57fe0510e3b1b02c27f0a5e738729680fb0ea5f4b74f70fb032c129"},
 ]
 
 [[package]]
@@ -2339,4 +2339,4 @@ propcache = ">=0.2.1"
 [metadata]
 lock-version = "2.1"
 python-versions = "^3.13"
-content-hash = "b61f6cdaf2367214e9f4c01f4f107bc5dba6976f59b3fc8f547857ad30b92f52"
+content-hash = "7b0e001db26ba9bc84ba9f000b0cf9b920c04db955acebf1256401ce286b9c8a"
