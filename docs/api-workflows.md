@@ -43,7 +43,7 @@ flowchart TD
 
 ```mermaid
 flowchart TD
-    A[POST /incoming-call/{twiml_file_stem}] --> B[Validate template exists]
+    A["POST /incoming-call/{twiml_file_stem}"] --> B[Validate template exists]
     B --> C{Template found?}
     C -->|No| D[HTTP 404 Not Found]
     C -->|Yes| E[Extract caller phone number]
