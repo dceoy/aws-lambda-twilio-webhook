@@ -324,9 +324,9 @@ def test_confirm_birthdate_no_digits(mocker: MockerFixture) -> None:
     mocker.patch("twiliowebhook.api.main.app", return_value=LambdaFunctionUrlResolver())
     mocker.patch(
         "twiliowebhook.api.main.app.current_event",
-        new=LambdaFunctionUrlEvent(
-            {"queryStringParameters": {"birthdate": "19900115"}}
-        ),
+        new=LambdaFunctionUrlEvent({
+            "queryStringParameters": {"birthdate": "19900115"}
+        }),
     )
     mock_logger_error = mocker.patch("twiliowebhook.api.main.logger.error")
     with pytest.raises(
