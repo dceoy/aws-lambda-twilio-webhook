@@ -23,12 +23,12 @@ flowchart TD
     E -->|No| F[HTTP 401 Unauthorized]
     E -->|Yes| G{Check digits value}
     
-    G -->|digits="1"| H[Load connect.twiml.xml]
+    G -->|digits=1| H[Load connect.twiml.xml]
     H --> I[Update Stream URL with media API]
     I --> J[Set caller phone in Stream Parameter]
     J --> K[Return Voice Assistant TwiML]
     
-    G -->|digits="2"| L[Load dial.twiml.xml]
+    G -->|digits=2| L[Load dial.twiml.xml]
     L --> M[Format operator number to E164]
     M --> N[Set dial target]
     N --> O[Return Operator Transfer TwiML]
@@ -105,10 +105,10 @@ flowchart TD
     E -->|No| F[HTTP 401 Unauthorized]
     E -->|Yes| G{Check digits value}
     
-    G -->|digits="1"| H[Load birthdate-confirmed.twiml.xml]
+    G -->|digits=1| H[Load birthdate-confirmed.twiml.xml]
     H --> I[Return Success Message TwiML]
     
-    G -->|digits="2"| J[Load birthdate-retry.twiml.xml]
+    G -->|digits=2| J[Load birthdate-retry.twiml.xml]
     J --> K[Set redirect to birthdate entry]
     K --> L[Return Retry TwiML]
     
