@@ -10,6 +10,14 @@ from aws_lambda_powertools.event_handler.exceptions import (
 from aws_lambda_powertools.utilities.data_classes import LambdaFunctionUrlEvent
 from twilio.request_validator import RequestValidator
 
+from .constants import (
+    ERROR_INVALID_TWILIO_SIGNATURE,
+    ERROR_MISSING_TWILIO_SIGNATURE,
+    HTTPS_SCHEME,
+    TWILIO_SIGNATURE_HEADER,
+    URL_QUERY_SEPARATOR,
+)
+
 logger = Logger()
 
 
@@ -29,20 +37,22 @@ def validate_http_twilio_signature(token: str, event: LambdaFunctionUrlEvent) ->
     validator = RequestValidator(token)
     query_parameters = event.get("queryStringParameters")
     query_string = (
-        "?{}".format("&".join([f"{k}={v}" for k, v in query_parameters.items()]))
+        f"{URL_QUERY_SEPARATOR}{
+            '&'.join([f'{k}={v}' for k, v in query_parameters.items()])
+        }"
         if query_parameters
         else ""
     )
-    uri = f"https://{event.request_context.domain_name}{event.path}{query_string}"
+    uri = f"{HTTPS_SCHEME}{event.request_context.domain_name}{event.path}{query_string}"
     logger.info("uri: %s", uri)
     logger.info("event.decoded_body: %s", event.decoded_body)
     params = dict(parse_qsl(event.decoded_body, keep_blank_values=True))
     logger.info("params: %s", params)
-    signature = event.headers.get("X-Twilio-Signature")
+    signature = event.headers.get(TWILIO_SIGNATURE_HEADER)
     if not signature:
-        error_message = "Missing X-Twilio-Signature header"
+        error_message = ERROR_MISSING_TWILIO_SIGNATURE
         raise BadRequestError(error_message)
     if not validator.validate(uri=uri, params=params, signature=signature):
-        error_message = "Invalid Twilio request signature"
+        error_message = ERROR_INVALID_TWILIO_SIGNATURE
         raise UnauthorizedError(error_message)
     logger.info("Twilio request signature is valid")

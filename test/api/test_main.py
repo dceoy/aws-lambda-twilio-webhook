@@ -21,12 +21,14 @@ from aws_lambda_powertools.utilities.data_classes import LambdaFunctionUrlEvent
 from defusedxml import ElementTree
 from pytest_mock import MockerFixture
 
+from twiliowebhook.api.constants import (
+    CONNECT_TWIML_FILE_PATH,
+    DIAL_TWIML_FILE_PATH,
+    GATHER_TWIML_FILE_PATH,
+    HANGUP_TWIML_FILE_PATH,
+    TWIML_DIR,
+)
 from twiliowebhook.api.main import (
-    _CONNECT_TWIML_FILE_PATH,
-    _DIAL_TWIML_FILE_PATH,
-    _GATHER_TWIML_FILE_PATH,
-    _HANGUP_TWIML_FILE_PATH,
-    _TWIML_DIR,
     _fetch_caller_phone_number_from_request,
     _respond_to_call,
     check_health,
@@ -47,16 +49,14 @@ def test_check_health() -> None:
 @pytest.mark.parametrize(
     ("digits", "twiml_file_path"),
     [
-        ("1", _CONNECT_TWIML_FILE_PATH),
-        ("2", _DIAL_TWIML_FILE_PATH),
-        ("3", _HANGUP_TWIML_FILE_PATH),
+        ("1", CONNECT_TWIML_FILE_PATH),
+        ("2", DIAL_TWIML_FILE_PATH),
+        ("3", HANGUP_TWIML_FILE_PATH),
     ],
 )
 def test_transfer_call(
     digits: str, twiml_file_path: str, mocker: MockerFixture
 ) -> None:
-    mocker.patch("twiliowebhook.api.main._SYSTEM_NAME", new="test")
-    mocker.patch("twiliowebhook.api.main._ENV_TYPE", new="mock")
     mocker.patch("twiliowebhook.api.main.app", return_value=LambdaFunctionUrlResolver())
     mock_event = LambdaFunctionUrlEvent({
         "queryStringParameters": {"digits": digits},
@@ -75,9 +75,9 @@ def test_transfer_call(
     mock_retrieve_ssm_parameters = mocker.patch(
         "twiliowebhook.api.main.retrieve_ssm_parameters",
         return_value={
-            "/test/mock/twilio-auth-token": twilio_auth_token,
-            "/test/mock/media-api-url": media_api_url,
-            "/test/mock/operator-phone-number": operator_phone_number,
+            "/twh/dev/twilio-auth-token": twilio_auth_token,
+            "/twh/dev/media-api-url": media_api_url,
+            "/twh/dev/operator-phone-number": operator_phone_number,
         },
     )
     mock_validate_http_twilio_signature = mocker.patch(
@@ -89,9 +89,9 @@ def test_transfer_call(
     )
     response = transfer_call()
     mock_retrieve_ssm_parameters.assert_called_once_with(
-        "/test/mock/twilio-auth-token",
-        "/test/mock/media-api-url",
-        "/test/mock/operator-phone-number",
+        "/twh/dev/twilio-auth-token",
+        "/twh/dev/media-api-url",
+        "/twh/dev/operator-phone-number",
     )
     mock_validate_http_twilio_signature.assert_called_once_with(
         token=twilio_auth_token,
@@ -103,10 +103,10 @@ def test_transfer_call(
     assert response.status_code == HTTPStatus.OK
     assert response.content_type == "application/xml"
     assert response.body is not None
-    if twiml_file_path == _CONNECT_TWIML_FILE_PATH:
+    if twiml_file_path == CONNECT_TWIML_FILE_PATH:
         assert caller_phone_number in response.body
         assert media_api_url in response.body
-    elif twiml_file_path == _DIAL_TWIML_FILE_PATH:
+    elif twiml_file_path == DIAL_TWIML_FILE_PATH:
         assert operator_phone_number in response.body
     else:
         assert "<Hangup />" in response.body
@@ -125,8 +125,6 @@ def test_transfer_call_no_digits(mocker: MockerFixture) -> None:
 
 
 def test_transfer_call_ssm_error(mocker: MockerFixture) -> None:
-    mocker.patch("twiliowebhook.api.main._SYSTEM_NAME", new="test")
-    mocker.patch("twiliowebhook.api.main._ENV_TYPE", new="mock")
     mocker.patch("twiliowebhook.api.main.app", return_value=LambdaFunctionUrlResolver())
     mocker.patch(
         "twiliowebhook.api.main.app.current_event",
@@ -153,8 +151,6 @@ def test_transfer_call_ssm_error(mocker: MockerFixture) -> None:
 def test_transfer_call_invalid_signature(
     exception: Any, error_message: str, mocker: MockerFixture
 ) -> None:
-    mocker.patch("twiliowebhook.api.main._SYSTEM_NAME", new="test")
-    mocker.patch("twiliowebhook.api.main._ENV_TYPE", new="mock")
     mocker.patch("twiliowebhook.api.main.app", return_value=LambdaFunctionUrlResolver())
     mocker.patch(
         "twiliowebhook.api.main.app.current_event",
@@ -165,7 +161,7 @@ def test_transfer_call_invalid_signature(
     )
     mocker.patch(
         "twiliowebhook.api.main.retrieve_ssm_parameters",
-        return_value={"/test/mock/twilio-auth-token": "token"},
+        return_value={"/twh/dev/twilio-auth-token": "token"},
     )
     mocker.patch(
         "twiliowebhook.api.main.validate_http_twilio_signature",
@@ -178,8 +174,6 @@ def test_transfer_call_invalid_signature(
 
 
 def test_handle_incoming_call(mocker: MockerFixture) -> None:
-    mocker.patch("twiliowebhook.api.main._SYSTEM_NAME", new="test")
-    mocker.patch("twiliowebhook.api.main._ENV_TYPE", new="mock")
     mocker.patch("twiliowebhook.api.main.app", return_value=LambdaFunctionUrlResolver())
     mocker.patch(
         "twiliowebhook.api.main.app.current_event", new=LambdaFunctionUrlEvent({})
@@ -195,9 +189,9 @@ def test_handle_incoming_call(mocker: MockerFixture) -> None:
     mock_retrieve_ssm_parameters = mocker.patch(
         "twiliowebhook.api.main.retrieve_ssm_parameters",
         return_value={
-            "/test/mock/twilio-auth-token": twilio_auth_token,
-            "/test/mock/media-api-url": media_api_url,
-            "/test/mock/webhook-api-url": webhook_api_url,
+            "/twh/dev/twilio-auth-token": twilio_auth_token,
+            "/twh/dev/media-api-url": media_api_url,
+            "/twh/dev/webhook-api-url": webhook_api_url,
         },
     )
     mock_validate_http_twilio_signature = mocker.patch(
@@ -214,16 +208,16 @@ def test_handle_incoming_call(mocker: MockerFixture) -> None:
     )
     response: Response[str] = handle_incoming_call(twiml_file_stem="connect")
     mock_retrieve_ssm_parameters.assert_called_once_with(
-        "/test/mock/twilio-auth-token",
-        "/test/mock/media-api-url",
-        "/test/mock/webhook-api-url",
+        "/twh/dev/twilio-auth-token",
+        "/twh/dev/media-api-url",
+        "/twh/dev/webhook-api-url",
     )
     mock_validate_http_twilio_signature.assert_called_once_with(
         token=twilio_auth_token,
         event=mocker.ANY,
     )
     mock__respond_to_call.assert_called_once_with(
-        twiml_file_path=_CONNECT_TWIML_FILE_PATH,
+        twiml_file_path=CONNECT_TWIML_FILE_PATH,
         caller_phone_number=caller_phone_number,
         media_api_url=media_api_url,
         webhook_api_url=webhook_api_url,
@@ -265,8 +259,6 @@ def test_handle_incoming_call_invalid_signature(
     error_message: str,
     mocker: MockerFixture,
 ) -> None:
-    mocker.patch("twiliowebhook.api.main._SYSTEM_NAME", new="test")
-    mocker.patch("twiliowebhook.api.main._ENV_TYPE", new="mock")
     mocker.patch("twiliowebhook.api.main.app", return_value=LambdaFunctionUrlResolver())
     mocker.patch(
         "twiliowebhook.api.main.app.current_event", new=LambdaFunctionUrlEvent({})
@@ -289,9 +281,9 @@ def test_handle_incoming_call_invalid_signature(
 @pytest.mark.parametrize("twiml_file_stem", ["connect", "gather", "hangup"])
 def test__respond_to_call(twiml_file_stem: str) -> None:
     twiml_file_path = {
-        "connect": _CONNECT_TWIML_FILE_PATH,
-        "gather": _GATHER_TWIML_FILE_PATH,
-        "hangup": _HANGUP_TWIML_FILE_PATH,
+        "connect": CONNECT_TWIML_FILE_PATH,
+        "gather": GATHER_TWIML_FILE_PATH,
+        "hangup": HANGUP_TWIML_FILE_PATH,
     }[twiml_file_stem]
     caller_phone_number: str = "+1234567890"
     media_api_url: str = "wss://api.example.com"
@@ -352,9 +344,7 @@ def test_handle_incoming_call_invalid_twiml_file_stem(mocker: MockerFixture) -> 
     mocker.patch("twiliowebhook.api.main.app", app_mock)
     mock_logger_error = mocker.patch("twiliowebhook.api.main.logger.error")
     invalid_stem = "non_existent_file"
-    expected_error_message = (
-        f"Invalid TwiML file: {_TWIML_DIR / invalid_stem}.twiml.xml"
-    )
+    expected_error_message = f"Invalid TwiML file: {TWIML_DIR / invalid_stem}.twiml.xml"
     with pytest.raises(BadRequestError, match=expected_error_message):
         handle_incoming_call(twiml_file_stem=invalid_stem)
     mock_logger_error.assert_called_once_with(expected_error_message)

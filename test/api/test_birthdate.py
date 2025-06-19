@@ -19,16 +19,14 @@ from aws_lambda_powertools.utilities.data_classes import LambdaFunctionUrlEvent
 from defusedxml import ElementTree
 from pytest_mock import MockerFixture
 
+from twiliowebhook.api.constants import HANGUP_TWIML_FILE_PATH
 from twiliowebhook.api.main import (
-    _HANGUP_TWIML_FILE_PATH,
     handle_incoming_call,
     process_birthdate,
 )
 
 
 def test_handle_incoming_call_birthdate(mocker: MockerFixture) -> None:
-    mocker.patch("twiliowebhook.api.main._SYSTEM_NAME", new="test")
-    mocker.patch("twiliowebhook.api.main._ENV_TYPE", new="mock")
     mocker.patch("twiliowebhook.api.main.app", return_value=LambdaFunctionUrlResolver())
     mocker.patch(
         "twiliowebhook.api.main.app.current_event", new=LambdaFunctionUrlEvent({})
@@ -44,9 +42,9 @@ def test_handle_incoming_call_birthdate(mocker: MockerFixture) -> None:
     mock_retrieve_ssm_parameters = mocker.patch(
         "twiliowebhook.api.main.retrieve_ssm_parameters",
         return_value={
-            "/test/mock/twilio-auth-token": twilio_auth_token,
-            "/test/mock/media-api-url": media_api_url,
-            "/test/mock/webhook-api-url": webhook_api_url,
+            "/twh/dev/twilio-auth-token": twilio_auth_token,
+            "/twh/dev/media-api-url": media_api_url,
+            "/twh/dev/webhook-api-url": webhook_api_url,
         },
     )
     mock_validate_http_twilio_signature = mocker.patch(
@@ -55,9 +53,9 @@ def test_handle_incoming_call_birthdate(mocker: MockerFixture) -> None:
     )
     response: Response[str] = handle_incoming_call(twiml_file_stem="birthdate")
     mock_retrieve_ssm_parameters.assert_called_once_with(
-        "/test/mock/twilio-auth-token",
-        "/test/mock/media-api-url",
-        "/test/mock/webhook-api-url",
+        "/twh/dev/twilio-auth-token",
+        "/twh/dev/media-api-url",
+        "/twh/dev/webhook-api-url",
     )
     mock_validate_http_twilio_signature.assert_called_once_with(
         token=twilio_auth_token,
@@ -85,8 +83,6 @@ def test_process_birthdate_valid(
     expected_day: str,
     mocker: MockerFixture,
 ) -> None:
-    mocker.patch("twiliowebhook.api.main._SYSTEM_NAME", new="test")
-    mocker.patch("twiliowebhook.api.main._ENV_TYPE", new="mock")
     mocker.patch("twiliowebhook.api.main.app", return_value=LambdaFunctionUrlResolver())
     mock_event = LambdaFunctionUrlEvent({
         "queryStringParameters": {"digits": digits},
@@ -97,7 +93,7 @@ def test_process_birthdate_valid(
     mock_retrieve_ssm_parameters = mocker.patch(
         "twiliowebhook.api.main.retrieve_ssm_parameters",
         return_value={
-            "/test/mock/twilio-auth-token": twilio_auth_token,
+            "/twh/dev/twilio-auth-token": twilio_auth_token,
         },
     )
     mock_validate_http_twilio_signature = mocker.patch(
@@ -105,14 +101,14 @@ def test_process_birthdate_valid(
     )
     mocker.patch(
         "twiliowebhook.api.main.parse_xml_and_extract_root",
-        return_value=ElementTree.parse(_HANGUP_TWIML_FILE_PATH).getroot(),
+        return_value=ElementTree.parse(HANGUP_TWIML_FILE_PATH).getroot(),
     )
     mock_logger_info = mocker.patch("twiliowebhook.api.main.logger.info")
 
     response = process_birthdate()
 
     mock_retrieve_ssm_parameters.assert_called_once_with(
-        "/test/mock/twilio-auth-token",
+        "/twh/dev/twilio-auth-token",
     )
     mock_validate_http_twilio_signature.assert_called_once_with(
         token=twilio_auth_token,
@@ -168,8 +164,6 @@ def test_process_birthdate_invalid_format(
 
 
 def test_process_birthdate_ssm_error(mocker: MockerFixture) -> None:
-    mocker.patch("twiliowebhook.api.main._SYSTEM_NAME", new="test")
-    mocker.patch("twiliowebhook.api.main._ENV_TYPE", new="mock")
     mocker.patch("twiliowebhook.api.main.app", return_value=LambdaFunctionUrlResolver())
     mocker.patch(
         "twiliowebhook.api.main.app.current_event",
@@ -196,8 +190,6 @@ def test_process_birthdate_ssm_error(mocker: MockerFixture) -> None:
 def test_process_birthdate_invalid_signature(
     exception: Any, error_message: str, mocker: MockerFixture
 ) -> None:
-    mocker.patch("twiliowebhook.api.main._SYSTEM_NAME", new="test")
-    mocker.patch("twiliowebhook.api.main._ENV_TYPE", new="mock")
     mocker.patch("twiliowebhook.api.main.app", return_value=LambdaFunctionUrlResolver())
     mocker.patch(
         "twiliowebhook.api.main.app.current_event",
@@ -208,7 +200,7 @@ def test_process_birthdate_invalid_signature(
     )
     mocker.patch(
         "twiliowebhook.api.main.retrieve_ssm_parameters",
-        return_value={"/test/mock/twilio-auth-token": "token"},
+        return_value={"/twh/dev/twilio-auth-token": "token"},
     )
     mocker.patch(
         "twiliowebhook.api.main.validate_http_twilio_signature",

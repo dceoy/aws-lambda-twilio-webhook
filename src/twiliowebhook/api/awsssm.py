@@ -3,6 +3,8 @@
 import boto3
 from aws_lambda_powertools import Logger
 
+from .constants import AWS_SSM_SERVICE, ERROR_INVALID_PARAMETERS
+
 logger = Logger()
 
 
@@ -18,9 +20,11 @@ def retrieve_ssm_parameters(*names: str) -> dict[str, str]:
     Raises:
         ValueError: If any of the parameter names are invalid.
     """
-    response = boto3.client("ssm").get_parameters(Names=names, WithDecryption=True)
+    response = boto3.client(AWS_SSM_SERVICE).get_parameters(
+        Names=names, WithDecryption=True
+    )
     if response.get("InvalidParameters"):
-        error_message = "Invalid parameters: {}".format(response["InvalidParameters"])
+        error_message = ERROR_INVALID_PARAMETERS.format(response["InvalidParameters"])
         raise ValueError(error_message)
     logger.info("Parameters are retrieved from Parameter Store: %s", names)
     return {p["Name"]: p["Value"] for p in response["Parameters"]}
