@@ -1,0 +1,7 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<Response>
+    <Say language="en-US" voice="Polly.Joanna">Invalid selection. Please press 1 to confirm or 2 to re-enter.</Say>
+    <Gather numDigits="1" method="POST" timeout="10" finishOnKey="#" action="to-be-replaced">
+    </Gather>
+    <Redirect>to-be-replaced</Redirect>
+</Response>

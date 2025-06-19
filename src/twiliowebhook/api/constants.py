@@ -14,6 +14,16 @@ DIAL_TWIML_FILE_PATH: str = str(TWIML_DIR / "dial.twiml.xml")
 GATHER_TWIML_FILE_PATH: str = str(TWIML_DIR / "gather.twiml.xml")
 HANGUP_TWIML_FILE_PATH: str = str(TWIML_DIR / "hangup.twiml.xml")
 BIRTHDATE_TWIML_FILE_PATH: str = str(TWIML_DIR / "birthdate.twiml.xml")
+BIRTHDATE_CONFIRMATION_TWIML_FILE_PATH: str = str(
+    TWIML_DIR / "birthdate-confirmation.twiml.xml"
+)
+BIRTHDATE_CONFIRMED_TWIML_FILE_PATH: str = str(
+    TWIML_DIR / "birthdate-confirmed.twiml.xml"
+)
+BIRTHDATE_RETRY_TWIML_FILE_PATH: str = str(TWIML_DIR / "birthdate-retry.twiml.xml")
+BIRTHDATE_INVALID_INPUT_TWIML_FILE_PATH: str = str(
+    TWIML_DIR / "birthdate-invalid-input.twiml.xml"
+)
 
 # Business Logic
 BIRTHDATE_DIGIT_LENGTH = 8

@@ -4,7 +4,6 @@ import json
 from http import HTTPStatus
 from typing import Any
 from urllib.parse import unquote, urlparse
-from xml.etree.ElementTree import Element  # noqa: S405
 
 import phonenumbers
 from aws_lambda_powertools import Logger, Tracer
@@ -24,7 +23,11 @@ from aws_lambda_powertools.utilities.typing import LambdaContext
 
 from .awsssm import retrieve_ssm_parameters
 from .constants import (
+    BIRTHDATE_CONFIRMATION_TWIML_FILE_PATH,
+    BIRTHDATE_CONFIRMED_TWIML_FILE_PATH,
     BIRTHDATE_DIGIT_LENGTH,
+    BIRTHDATE_INVALID_INPUT_TWIML_FILE_PATH,
+    BIRTHDATE_RETRY_TWIML_FILE_PATH,
     BIRTHDATE_TWIML_FILE_PATH,
     CONNECT_TWIML_FILE_PATH,
     CONTENT_TYPE_XML,
@@ -261,59 +264,6 @@ def _respond_to_call(
     )
 
 
-def _create_say_element(text: str) -> Element:
-    """Create a standardized Say element for TwiML.
-
-    Args:
-        text (str): The text to be spoken.
-
-    Returns:
-        Element: A Say element with standard attributes.
-
-    """
-    return Element(
-        "Say",
-        attrib={"language": "en-US", "voice": "Polly.Joanna"},
-        text=text,
-    )
-
-
-def _create_gather_element(action_url: str, num_digits: str = "1") -> Element:
-    """Create a standardized Gather element for TwiML.
-
-    Args:
-        action_url (str): The URL to send the gathered digits to.
-        num_digits (str): Number of digits to gather.
-
-    Returns:
-        Element: A Gather element with standard attributes.
-
-    """
-    return Element(
-        "Gather",
-        attrib={
-            "numDigits": num_digits,
-            "method": "POST",
-            "timeout": "10",
-            "finishOnKey": "#",
-            "action": action_url,
-        },
-    )
-
-
-def _create_redirect_element(url: str) -> Element:
-    """Create a Redirect element for TwiML.
-
-    Args:
-        url (str): The URL to redirect to.
-
-    Returns:
-        Element: A Redirect element with the specified URL.
-
-    """
-    return Element("Redirect", text=url)
-
-
 def _build_webhook_urls(webhook_api_url: str) -> dict[str, str]:
     """Build all webhook URLs needed for birthdate processing.
 
@@ -347,99 +297,6 @@ def _parse_birthdate_digits(digits: str) -> dict[str, str]:
         "month": digits[4:6],
         "day": digits[6:8],
     }
-
-
-def _build_confirmation_twiml(
-    date_parts: dict[str, str], confirm_url: str, digits: str
-) -> Element:
-    """Build TwiML for birthdate confirmation prompt.
-
-    Args:
-        date_parts (dict[str, str]): Dictionary with year, month, day.
-        confirm_url (str): URL for confirmation endpoint.
-        digits (str): Original birthdate digits.
-
-    Returns:
-        Element: Root TwiML element for confirmation.
-
-    """
-    root = Element("Response")
-
-    say = _create_say_element(
-        f"You entered {date_parts['month']} {date_parts['day']}, "
-        f"{date_parts['year']} as your birth date. "
-        f"Press 1 to confirm, or press 2 to re-enter your birth date."
-    )
-    root.append(say)
-
-    gather = _create_gather_element(f"{confirm_url}?birthdate={digits}")
-    root.append(gather)
-
-    return root
-
-
-def _build_confirmed_twiml(date_parts: dict[str, str]) -> Element:
-    """Build TwiML for confirmed birthdate response.
-
-    Args:
-        date_parts (dict[str, str]): Dictionary with year, month, day.
-
-    Returns:
-        Element: Root TwiML element for confirmation success.
-
-    """
-    root = parse_xml_and_extract_root(xml_file_path=HANGUP_TWIML_FILE_PATH)
-    say = _create_say_element(
-        f"Thank you. We have recorded your birth date as "
-        f"{date_parts['month']} {date_parts['day']}, {date_parts['year']}. Goodbye!"
-    )
-    root.insert(0, say)
-    return root
-
-
-def _build_retry_twiml(birthdate_entry_url: str) -> Element:
-    """Build TwiML for retry birthdate entry.
-
-    Args:
-        birthdate_entry_url (str): URL for birthdate entry.
-
-    Returns:
-        Element: Root TwiML element for retry.
-
-    """
-    root = Element("Response")
-    say = _create_say_element("Let's try again.")
-    root.append(say)
-    redirect = _create_redirect_element(birthdate_entry_url)
-    root.append(redirect)
-    return root
-
-
-def _build_invalid_input_twiml(
-    birthdate: str, urls: dict[str, str]
-) -> Element:
-    """Build TwiML for invalid confirmation input.
-
-    Args:
-        birthdate (str): Original birthdate digits.
-        urls (dict[str, str]): Dictionary of webhook URLs.
-
-    Returns:
-        Element: Root TwiML element for invalid input handling.
-
-    """
-    root = Element("Response")
-    say = _create_say_element(
-        "Invalid selection. Please press 1 to confirm or 2 to re-enter."
-    )
-    root.append(say)
-
-    gather = _create_gather_element(f"{urls['confirm']}?birthdate={birthdate}")
-    root.append(gather)
-
-    redirect = _create_redirect_element(urls["birthdate_entry"])
-    root.append(redirect)
-    return root
 
 
 def _fetch_caller_phone_number_from_request(event: LambdaFunctionUrlEvent) -> str:
@@ -543,18 +400,26 @@ def process_birthdate() -> Response[str]:
         webhook_api_url = parameters[parameter_names[SSM_WEBHOOK_API_URL]]
         urls = _build_webhook_urls(webhook_api_url)
 
-        # Create confirmation prompt
-        root = _build_confirmation_twiml(date_parts, urls["confirm"], digits)
-
-        # Add default action if no input
-        say_default = _create_say_element(
-            "We didn't receive your confirmation. Please try again."
+        # Use template for confirmation prompt
+        root = parse_xml_and_extract_root(
+            xml_file_path=BIRTHDATE_CONFIRMATION_TWIML_FILE_PATH
         )
-        root.append(say_default)
 
-        # Add redirect back to birthdate entry
-        redirect = _create_redirect_element(urls["birthdate_entry"])
-        root.append(redirect)
+        # Update the Say element with actual birthdate
+        say = find_xml_element(root=root, namespaces="./Say")
+        say.text = (
+            f"You entered {date_parts['month']} {date_parts['day']}, "
+            f"{date_parts['year']} as your birth date. "
+            f"Press 1 to confirm, or press 2 to re-enter your birth date."
+        )
+
+        # Update the Gather action URL
+        gather = find_xml_element(root=root, namespaces="./Gather")
+        gather.set("action", f"{urls['confirm']}?birthdate={digits}")
+
+        # Update the Redirect URL
+        redirect = find_xml_element(root=root, namespaces="./Redirect")
+        redirect.text = urls["birthdate_entry"]
 
         twiml = convert_xml_root_to_string(root=root, logger=logger)
     except (BadRequestError, UnauthorizedError) as e:
@@ -623,13 +488,34 @@ def confirm_birthdate() -> Response[str]:
                 date_parts["month"],
                 date_parts["day"],
             )
-            root = _build_confirmed_twiml(date_parts)
+            # Use template for confirmed birthdate
+            root = parse_xml_and_extract_root(
+                xml_file_path=BIRTHDATE_CONFIRMED_TWIML_FILE_PATH
+            )
+            say = find_xml_element(root=root, namespaces="./Say")
+            say.text = (
+                f"Thank you. We have recorded your birth date as "
+                f"{date_parts['month']} {date_parts['day']}, "
+                f"{date_parts['year']}. Goodbye!"
+            )
         elif digits == "2":  # Re-enter
             logger.info("User chose to re-enter birth date")
-            root = _build_retry_twiml(urls["birthdate_entry"])
+            # Use template for retry
+            root = parse_xml_and_extract_root(
+                xml_file_path=BIRTHDATE_RETRY_TWIML_FILE_PATH
+            )
+            redirect = find_xml_element(root=root, namespaces="./Redirect")
+            redirect.text = urls["birthdate_entry"]
         else:  # Invalid input
             logger.warning("Invalid confirmation input: %s", digits)
-            root = _build_invalid_input_twiml(birthdate, urls)
+            # Use template for invalid input
+            root = parse_xml_and_extract_root(
+                xml_file_path=BIRTHDATE_INVALID_INPUT_TWIML_FILE_PATH
+            )
+            gather = find_xml_element(root=root, namespaces="./Gather")
+            gather.set("action", f"{urls['confirm']}?birthdate={birthdate}")
+            redirect = find_xml_element(root=root, namespaces="./Redirect")
+            redirect.text = urls["birthdate_entry"]
 
         twiml = convert_xml_root_to_string(root=root, logger=logger)
     except (BadRequestError, UnauthorizedError) as e:

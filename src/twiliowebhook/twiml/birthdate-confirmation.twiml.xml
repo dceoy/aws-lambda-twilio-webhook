@@ -1,0 +1,8 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<Response>
+    <Say language="en-US" voice="Polly.Joanna">You entered MONTH DAY, YEAR as your birth date. Press 1 to confirm, or press 2 to re-enter your birth date.</Say>
+    <Gather numDigits="1" method="POST" timeout="10" finishOnKey="#" action="to-be-replaced">
+    </Gather>
+    <Say language="en-US" voice="Polly.Joanna">We didn't receive your confirmation. Please try again.</Say>
+    <Redirect>to-be-replaced</Redirect>
+</Response>
