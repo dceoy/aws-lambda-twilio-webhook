@@ -6,7 +6,7 @@ from http import HTTPStatus
 from pathlib import Path
 from typing import Any
 from urllib.parse import unquote, urlparse
-from xml.etree.ElementTree import Element
+from xml.etree.ElementTree import Element  # noqa: S405
 
 import phonenumbers
 from aws_lambda_powertools import Logger, Tracer
@@ -325,8 +325,7 @@ def process_birthdate() -> Response[str]:
         raise BadRequestError(error_message)
 
     parameter_names = {
-        k: f"/{_SYSTEM_NAME}/{_ENV_TYPE}/{k}"
-        for k in ["twilio-auth-token"]
+        k: f"/{_SYSTEM_NAME}/{_ENV_TYPE}/{k}" for k in ["twilio-auth-token"]
     }
 
     try:

@@ -21,11 +21,16 @@ RUN \
 
 RUN \
       --mount=type=cache,target=/root/.cache/pip \
+      --mount=type=cache,target=/root/.cache/uv \
       --mount=type=bind,source=.,target=/mnt/host \
-      /var/lang/bin/python -m pip install -U awslambdaric pip poetry poetry-plugin-export \
-      && /var/lang/bin/python -m poetry --directory=/mnt/host export \
-        --format=requirements.txt --output=/tmp/requirements.txt \
-      && /var/lang/bin/python -m pip uninstall -y poetry poetry-plugin-export \
+      /var/lang/bin/python -m pip install -U awslambdaric pip uv \
+      && /var/lang/bin/python -m uv pip compile \
+        --python /var/lang/bin/python \
+        --no-strip-extras \
+        --extra tracer \
+        /mnt/host/pyproject.toml \
+        -o /tmp/requirements.txt \
+      && /var/lang/bin/python -m pip uninstall -y uv \
       && /var/lang/bin/python -m pip install -U -r /tmp/requirements.txt
 
 

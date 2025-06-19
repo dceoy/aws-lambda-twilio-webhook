@@ -6,38 +6,38 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ### Development Setup
 ```bash
-# Install Poetry (if not already installed)
-pip install -U poetry
+# Install UV (if not already installed)
+curl -LsSf https://astral.sh/uv/install.sh | sh
 
 # Install project dependencies
-poetry install
+uv sync --all-extras
 ```
 
 ### Testing
 ```bash
 # Run all tests with coverage
-poetry run pytest
+uv run pytest
 
 # Run specific test file
-poetry run pytest test/api/test_main.py
+uv run pytest test/api/test_main.py
 
 # Run tests with verbose output
-poetry run pytest -v
+uv run pytest -v
 ```
 
 ### Code Quality
 ```bash
 # Run linting with Ruff
-poetry run ruff check .
+uv run ruff check .
 
 # Auto-fix linting issues
-poetry run ruff check --fix .
+uv run ruff check --fix .
 
 # Format code with Ruff
-poetry run ruff format .
+uv run ruff format .
 
 # Run type checking with Pyright
-poetry run pyright
+uv run pyright
 ```
 
 ### Building and Deployment
