@@ -40,6 +40,7 @@ HEALTH_ENDPOINT = "/health"
 TRANSFER_CALL_ENDPOINT = "/transfer-call"
 INCOMING_CALL_ENDPOINT = "/incoming-call/<twiml_file_stem>"
 PROCESS_BIRTHDATE_PATH = "/process-birthdate"
+CONFIRM_BIRTHDATE_PATH = "/confirm-birthdate"
 
 # URL Components
 HTTPS_SCHEME = "https://"

@@ -21,6 +21,7 @@ from pytest_mock import MockerFixture
 
 from twiliowebhook.api.constants import HANGUP_TWIML_FILE_PATH
 from twiliowebhook.api.main import (
+    confirm_birthdate,
     handle_incoming_call,
     process_birthdate,
 )
@@ -90,18 +91,16 @@ def test_process_birthdate_valid(
     })
     mocker.patch("twiliowebhook.api.main.app.current_event", new=mock_event)
     twilio_auth_token = "test-token"
+    webhook_api_url = "https://api.example.com"
     mock_retrieve_ssm_parameters = mocker.patch(
         "twiliowebhook.api.main.retrieve_ssm_parameters",
         return_value={
             "/twh/dev/twilio-auth-token": twilio_auth_token,
+            "/twh/dev/webhook-api-url": webhook_api_url,
         },
     )
     mock_validate_http_twilio_signature = mocker.patch(
         "twiliowebhook.api.main.validate_http_twilio_signature"
-    )
-    mocker.patch(
-        "twiliowebhook.api.main.parse_xml_and_extract_root",
-        return_value=ElementTree.parse(HANGUP_TWIML_FILE_PATH).getroot(),
     )
     mock_logger_info = mocker.patch("twiliowebhook.api.main.logger.info")
 
@@ -109,6 +108,7 @@ def test_process_birthdate_valid(
 
     mock_retrieve_ssm_parameters.assert_called_once_with(
         "/twh/dev/twilio-auth-token",
+        "/twh/dev/webhook-api-url",
     )
     mock_validate_http_twilio_signature.assert_called_once_with(
         token=twilio_auth_token,
@@ -121,7 +121,8 @@ def test_process_birthdate_valid(
     assert response.content_type == "application/xml"
     assert response.body is not None
     assert f"{expected_month} {expected_day}, {expected_year}" in response.body
-    assert "Thank you. We have recorded your birth date" in response.body
+    assert "Press 1 to confirm, or press 2 to re-enter" in response.body
+    assert "confirm-birthdate" in response.body
 
 
 def test_process_birthdate_no_digits(mocker: MockerFixture) -> None:
@@ -200,7 +201,10 @@ def test_process_birthdate_invalid_signature(
     )
     mocker.patch(
         "twiliowebhook.api.main.retrieve_ssm_parameters",
-        return_value={"/twh/dev/twilio-auth-token": "token"},
+        return_value={
+            "/twh/dev/twilio-auth-token": "token",
+            "/twh/dev/webhook-api-url": "https://api.example.com",
+        },
     )
     mocker.patch(
         "twiliowebhook.api.main.validate_http_twilio_signature",
@@ -210,3 +214,141 @@ def test_process_birthdate_invalid_signature(
     with pytest.raises(exception, match=error_message):
         process_birthdate()
     mock_logger_exception.assert_called_once_with(error_message)
+
+
+def test_confirm_birthdate_confirm(mocker: MockerFixture) -> None:
+    mocker.patch("twiliowebhook.api.main.app", return_value=LambdaFunctionUrlResolver())
+    mock_event = LambdaFunctionUrlEvent({
+        "queryStringParameters": {"digits": "1", "birthdate": "19900115"},
+        "headers": {"X-Twilio-Signature": "test-signature"},
+    })
+    mocker.patch("twiliowebhook.api.main.app.current_event", new=mock_event)
+    twilio_auth_token = "test-token"
+    webhook_api_url = "https://api.example.com"
+    mock_retrieve_ssm_parameters = mocker.patch(
+        "twiliowebhook.api.main.retrieve_ssm_parameters",
+        return_value={
+            "/twh/dev/twilio-auth-token": twilio_auth_token,
+            "/twh/dev/webhook-api-url": webhook_api_url,
+        },
+    )
+    mock_validate_http_twilio_signature = mocker.patch(
+        "twiliowebhook.api.main.validate_http_twilio_signature"
+    )
+    mocker.patch(
+        "twiliowebhook.api.main.parse_xml_and_extract_root",
+        return_value=ElementTree.parse(HANGUP_TWIML_FILE_PATH).getroot(),
+    )
+    mock_logger_info = mocker.patch("twiliowebhook.api.main.logger.info")
+
+    response = confirm_birthdate()
+
+    mock_retrieve_ssm_parameters.assert_called_once_with(
+        "/twh/dev/twilio-auth-token",
+        "/twh/dev/webhook-api-url",
+    )
+    mock_validate_http_twilio_signature.assert_called_once_with(
+        token=twilio_auth_token,
+        event=mock_event,
+    )
+    mock_logger_info.assert_any_call(
+        "Birth date confirmed: %s-%s-%s", "1990", "01", "15"
+    )
+    assert response.status_code == HTTPStatus.OK
+    assert response.content_type == "application/xml"
+    assert response.body is not None
+    assert "Thank you. We have recorded your birth date as 01 15, 1990" in response.body
+
+
+def test_confirm_birthdate_re_enter(mocker: MockerFixture) -> None:
+    mocker.patch("twiliowebhook.api.main.app", return_value=LambdaFunctionUrlResolver())
+    mock_event = LambdaFunctionUrlEvent({
+        "queryStringParameters": {"digits": "2", "birthdate": "19900115"},
+        "headers": {"X-Twilio-Signature": "test-signature"},
+    })
+    mocker.patch("twiliowebhook.api.main.app.current_event", new=mock_event)
+    twilio_auth_token = "test-token"
+    webhook_api_url = "https://api.example.com"
+    mocker.patch(
+        "twiliowebhook.api.main.retrieve_ssm_parameters",
+        return_value={
+            "/twh/dev/twilio-auth-token": twilio_auth_token,
+            "/twh/dev/webhook-api-url": webhook_api_url,
+        },
+    )
+    mocker.patch("twiliowebhook.api.main.validate_http_twilio_signature")
+    mock_logger_info = mocker.patch("twiliowebhook.api.main.logger.info")
+
+    response = confirm_birthdate()
+
+    mock_logger_info.assert_any_call("User chose to re-enter birth date")
+    assert response.status_code == HTTPStatus.OK
+    assert response.content_type == "application/xml"
+    assert response.body is not None
+    assert "Let's try again" in response.body
+    assert "/incoming-call/birthdate" in response.body
+
+
+def test_confirm_birthdate_invalid_input(mocker: MockerFixture) -> None:
+    mocker.patch("twiliowebhook.api.main.app", return_value=LambdaFunctionUrlResolver())
+    mock_event = LambdaFunctionUrlEvent({
+        "queryStringParameters": {"digits": "9", "birthdate": "19900115"},
+        "headers": {"X-Twilio-Signature": "test-signature"},
+    })
+    mocker.patch("twiliowebhook.api.main.app.current_event", new=mock_event)
+    twilio_auth_token = "test-token"
+    webhook_api_url = "https://api.example.com"
+    mocker.patch(
+        "twiliowebhook.api.main.retrieve_ssm_parameters",
+        return_value={
+            "/twh/dev/twilio-auth-token": twilio_auth_token,
+            "/twh/dev/webhook-api-url": webhook_api_url,
+        },
+    )
+    mocker.patch("twiliowebhook.api.main.validate_http_twilio_signature")
+    mock_logger_warning = mocker.patch("twiliowebhook.api.main.logger.warning")
+
+    response = confirm_birthdate()
+
+    mock_logger_warning.assert_any_call("Invalid confirmation input: %s", "9")
+    assert response.status_code == HTTPStatus.OK
+    assert response.content_type == "application/xml"
+    assert response.body is not None
+    assert (
+        "Invalid selection. Please press 1 to confirm or 2 to re-enter" in response.body
+    )
+    assert "confirm-birthdate" in response.body
+
+
+def test_confirm_birthdate_no_digits(mocker: MockerFixture) -> None:
+    mocker.patch("twiliowebhook.api.main.app", return_value=LambdaFunctionUrlResolver())
+    mocker.patch(
+        "twiliowebhook.api.main.app.current_event",
+        new=LambdaFunctionUrlEvent(
+            {"queryStringParameters": {"birthdate": "19900115"}}
+        ),
+    )
+    mock_logger_error = mocker.patch("twiliowebhook.api.main.logger.error")
+    with pytest.raises(
+        BadRequestError, match="Confirmation digits not found in the request"
+    ):
+        confirm_birthdate()
+    mock_logger_error.assert_called_once_with(
+        "Confirmation digits not found in the request"
+    )
+
+
+def test_confirm_birthdate_no_birthdate(mocker: MockerFixture) -> None:
+    mocker.patch("twiliowebhook.api.main.app", return_value=LambdaFunctionUrlResolver())
+    mocker.patch(
+        "twiliowebhook.api.main.app.current_event",
+        new=LambdaFunctionUrlEvent({"queryStringParameters": {"digits": "1"}}),
+    )
+    mock_logger_error = mocker.patch("twiliowebhook.api.main.logger.error")
+    with pytest.raises(
+        BadRequestError, match="Birthdate parameter not found in the request"
+    ):
+        confirm_birthdate()
+    mock_logger_error.assert_called_once_with(
+        "Birthdate parameter not found in the request"
+    )

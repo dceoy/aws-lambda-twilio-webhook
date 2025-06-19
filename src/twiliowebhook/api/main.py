@@ -341,7 +341,8 @@ def process_birthdate() -> Response[str]:
         raise BadRequestError(error_message)
 
     parameter_names = {
-        k: f"/{SYSTEM_NAME}/{ENV_TYPE}/{k}" for k in [SSM_TWILIO_AUTH_TOKEN]
+        k: f"/{SYSTEM_NAME}/{ENV_TYPE}/{k}"
+        for k in [SSM_TWILIO_AUTH_TOKEN, SSM_WEBHOOK_API_URL]
     }
 
     try:
@@ -356,15 +357,149 @@ def process_birthdate() -> Response[str]:
         day = digits[6:8]
         logger.info("Received birth date: %s-%s-%s", year, month, day)
 
-        # Create a simple confirmation response
-        root = parse_xml_and_extract_root(xml_file_path=HANGUP_TWIML_FILE_PATH)
-        # Add a Say element before Hangup
+        # Create confirmation prompt using Gather
+        root = Element("Response")
+
+        # Add confirmation message
         say = Element("Say", attrib={"language": "en-US", "voice": "Polly.Joanna"})
         say.text = (
-            f"Thank you. We have recorded your birth date as "
-            f"{month} {day}, {year}. Goodbye!"
+            f"You entered {month} {day}, {year} as your birth date. "
+            f"Press 1 to confirm, or press 2 to re-enter your birth date."
         )
-        root.insert(0, say)
+        root.append(say)
+
+        # Add Gather for confirmation
+        gather = Element("Gather", attrib={
+            "numDigits": "1",
+            "method": "POST",
+            "timeout": "10",
+            "finishOnKey": "#"
+        })
+
+        # Set the action URL for confirmation
+        webhook_api_url = parameters[parameter_names[SSM_WEBHOOK_API_URL]]
+        webhook_api_fqdn = urlparse(webhook_api_url).netloc
+        confirm_url = f"{HTTPS_SCHEME}{webhook_api_fqdn}/confirm-birthdate"
+        gather.set("action", f"{confirm_url}?birthdate={digits}")
+
+        root.append(gather)
+
+        # Default action if no input
+        say_default = Element(
+            "Say", attrib={"language": "en-US", "voice": "Polly.Joanna"}
+        )
+        say_default.text = "We didn't receive your confirmation. Please try again."
+        root.append(say_default)
+
+        # Redirect back to birthdate entry
+        redirect = Element("Redirect")
+        redirect.text = f"{HTTPS_SCHEME}{webhook_api_fqdn}/incoming-call/birthdate"
+        root.append(redirect)
+
+        twiml = convert_xml_root_to_string(root=root, logger=logger)
+    except (BadRequestError, UnauthorizedError) as e:
+        logger.exception(e.msg)
+        raise
+    except Exception as e:
+        error_message = str(e)
+        logger.exception(error_message)
+        raise InternalServerError(error_message) from e
+    else:
+        return Response(
+            status_code=HTTPStatus.OK,
+            content_type=CONTENT_TYPE_XML,
+            body=twiml,
+        )
+
+
+@app.post("/confirm-birthdate")
+@tracer.capture_method
+def confirm_birthdate() -> Response[str]:
+    """Handle birthdate confirmation and return TwiML response.
+
+    Returns:
+        Response[str]: TwiML response after processing confirmation.
+
+    Raises:
+        BadRequestError: If the confirmation input is missing or invalid.
+        UnauthorizedError: If the request signature is invalid.
+        InternalServerError: If there's an error processing the request.
+
+    """
+    digits = app.current_event["queryStringParameters"].get("digits")
+    birthdate = app.current_event["queryStringParameters"].get("birthdate")
+
+    if not digits:
+        error_message = "Confirmation digits not found in the request"
+        logger.error(error_message)
+        raise BadRequestError(error_message)
+
+    if not birthdate:
+        error_message = "Birthdate parameter not found in the request"
+        logger.error(error_message)
+        raise BadRequestError(error_message)
+
+    parameter_names = {
+        k: f"/{SYSTEM_NAME}/{ENV_TYPE}/{k}"
+        for k in [SSM_TWILIO_AUTH_TOKEN, SSM_WEBHOOK_API_URL]
+    }
+
+    try:
+        parameters = retrieve_ssm_parameters(*parameter_names.values())
+        validate_http_twilio_signature(
+            token=parameters[parameter_names[SSM_TWILIO_AUTH_TOKEN]],
+            event=app.current_event,
+        )
+
+        webhook_api_url = parameters[parameter_names[SSM_WEBHOOK_API_URL]]
+        webhook_api_fqdn = urlparse(webhook_api_url).netloc
+
+        if digits == "1":  # Confirm
+            year = birthdate[:4]
+            month = birthdate[4:6]
+            day = birthdate[6:8]
+            logger.info("Birth date confirmed: %s-%s-%s", year, month, day)
+
+            # Create final confirmation response
+            root = parse_xml_and_extract_root(xml_file_path=HANGUP_TWIML_FILE_PATH)
+            say = Element("Say", attrib={"language": "en-US", "voice": "Polly.Joanna"})
+            say.text = (
+                f"Thank you. We have recorded your birth date as "
+                f"{month} {day}, {year}. Goodbye!"
+            )
+            root.insert(0, say)
+        elif digits == "2":  # Re-enter
+            logger.info("User chose to re-enter birth date")
+            # Redirect back to birthdate entry
+            root = Element("Response")
+            say = Element("Say", attrib={"language": "en-US", "voice": "Polly.Joanna"})
+            say.text = "Let's try again."
+            root.append(say)
+            redirect = Element("Redirect")
+            redirect.text = f"{HTTPS_SCHEME}{webhook_api_fqdn}/incoming-call/birthdate"
+            root.append(redirect)
+        else:  # Invalid input
+            logger.warning("Invalid confirmation input: %s", digits)
+            root = Element("Response")
+            say = Element("Say", attrib={"language": "en-US", "voice": "Polly.Joanna"})
+            say.text = "Invalid selection. Please press 1 to confirm or 2 to re-enter."
+            root.append(say)
+
+            # Gather for confirmation again
+            gather = Element("Gather", attrib={
+                "numDigits": "1",
+                "method": "POST",
+                "timeout": "10",
+                "finishOnKey": "#"
+            })
+            confirm_url = f"{HTTPS_SCHEME}{webhook_api_fqdn}/confirm-birthdate"
+            gather.set("action", f"{confirm_url}?birthdate={birthdate}")
+            root.append(gather)
+
+            # Default redirect if no input
+            redirect = Element("Redirect")
+            redirect.text = f"{HTTPS_SCHEME}{webhook_api_fqdn}/incoming-call/birthdate"
+            root.append(redirect)
 
         twiml = convert_xml_root_to_string(root=root, logger=logger)
     except (BadRequestError, UnauthorizedError) as e:
