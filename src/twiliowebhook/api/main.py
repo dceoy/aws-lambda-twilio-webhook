@@ -6,6 +6,7 @@ from http import HTTPStatus
 from pathlib import Path
 from typing import Any
 from urllib.parse import unquote, urlparse
+from xml.etree.ElementTree import Element
 
 import phonenumbers
 from aws_lambda_powertools import Logger, Tracer
@@ -42,6 +43,8 @@ _CONNECT_TWIML_FILE_PATH: str = str(_TWIML_DIR / "connect.twiml.xml")
 _DIAL_TWIML_FILE_PATH: str = str(_TWIML_DIR / "dial.twiml.xml")
 _GATHER_TWIML_FILE_PATH: str = str(_TWIML_DIR / "gather.twiml.xml")
 _HANGUP_TWIML_FILE_PATH: str = str(_TWIML_DIR / "hangup.twiml.xml")
+_BIRTHDATE_TWIML_FILE_PATH: str = str(_TWIML_DIR / "birthdate.twiml.xml")
+_BIRTHDATE_DIGIT_LENGTH = 8
 
 
 @app.get("/health")
@@ -224,6 +227,17 @@ def _respond_to_call(
         transfer_api_url = f"https://{webhook_api_fqdn}/transfer-call"
         logger.info("transfer_api_url: %s", transfer_api_url)
         gather.set("action", transfer_api_url)
+    elif twiml_file_path == _BIRTHDATE_TWIML_FILE_PATH:
+        gather = find_xml_element(root=root, namespaces="./Gather")
+        webhook_api_fqdn = urlparse(webhook_api_url).netloc
+        process_birthdate_url = f"https://{webhook_api_fqdn}/process-birthdate"
+        logger.info("process_birthdate_url: %s", process_birthdate_url)
+        gather.set("action", process_birthdate_url)
+        # Set the redirect URL for retry
+        redirect = find_xml_element(root=root, namespaces="./Redirect")
+        current_url = urlparse(webhook_api_url).path
+        if current_url:
+            redirect.text = f"https://{webhook_api_fqdn}{current_url}"
     return Response(
         status_code=HTTPStatus.OK,
         content_type="application/xml",
@@ -280,3 +294,74 @@ def lambda_handler(event: dict[str, Any], context: LambdaContext) -> dict[str, A
     """
     logger.info("Event received")
     return app.resolve(event=event, context=context)
+
+
+@app.post("/process-birthdate")
+@tracer.capture_method
+def process_birthdate() -> Response[str]:
+    """Process birth date input and return TwiML response.
+
+    Returns:
+        Response[str]: TwiML response after processing birth date.
+
+    Raises:
+        BadRequestError: If the birth date is missing or invalid.
+        UnauthorizedError: If the request signature is invalid.
+        InternalServerError: If there's an error processing the request.
+
+    """
+    digits = app.current_event["queryStringParameters"].get("digits")
+    if not digits:
+        error_message = "Birth date digits not found in the request"
+        logger.error(error_message)
+        raise BadRequestError(error_message)
+
+    if len(digits) != _BIRTHDATE_DIGIT_LENGTH or not digits.isdigit():
+        error_message = (
+            f"Invalid birth date format: {digits}. "
+            f"Expected YYYYMMDD ({_BIRTHDATE_DIGIT_LENGTH} digits)."
+        )
+        logger.error(error_message)
+        raise BadRequestError(error_message)
+
+    parameter_names = {
+        k: f"/{_SYSTEM_NAME}/{_ENV_TYPE}/{k}"
+        for k in ["twilio-auth-token"]
+    }
+
+    try:
+        parameters = retrieve_ssm_parameters(*parameter_names.values())
+        validate_http_twilio_signature(
+            token=parameters[parameter_names["twilio-auth-token"]],
+            event=app.current_event,
+        )
+
+        year = digits[:4]
+        month = digits[4:6]
+        day = digits[6:8]
+        logger.info("Received birth date: %s-%s-%s", year, month, day)
+
+        # Create a simple confirmation response
+        root = parse_xml_and_extract_root(xml_file_path=_HANGUP_TWIML_FILE_PATH)
+        # Add a Say element before Hangup
+        say = Element("Say", attrib={"language": "en-US", "voice": "Polly.Joanna"})
+        say.text = (
+            f"Thank you. We have recorded your birth date as "
+            f"{month} {day}, {year}. Goodbye!"
+        )
+        root.insert(0, say)
+
+        twiml = convert_xml_root_to_string(root=root, logger=logger)
+    except (BadRequestError, UnauthorizedError) as e:
+        logger.exception(e.msg)
+        raise
+    except Exception as e:
+        error_message = str(e)
+        logger.exception(error_message)
+        raise InternalServerError(error_message) from e
+    else:
+        return Response(
+            status_code=HTTPStatus.OK,
+            content_type="application/xml",
+            body=twiml,
+        )

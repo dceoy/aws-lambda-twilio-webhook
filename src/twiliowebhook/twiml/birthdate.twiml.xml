@@ -1,0 +1,10 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<Response>
+    <Say language="en-US" voice="Polly.Joanna">Please enter your birth date using your phone keypad.</Say>
+    <Pause length="1" />
+    <Gather numDigits="8" action="to-be-replaced" method="POST" timeout="20" finishOnKey="#">
+        <Say language="en-US" voice="Polly.Joanna">Enter the year, month, and day as 8 digits. For example, for January 15th, 1990, enter <prosody rate="slow">1 9 9 0 0 1 1 5</prosody>. Press pound when finished.</Say>
+    </Gather>
+    <Say language="en-US" voice="Polly.Joanna">We didn't receive your birth date. Please try again.</Say>
+    <Redirect>to-be-replaced</Redirect>
+</Response>
