@@ -1,9 +1,7 @@
 """AWS Lambda function handler for incoming webhook from Twilio."""
 
 import json
-import os
 from http import HTTPStatus
-from pathlib import Path
 from typing import Any
 from urllib.parse import unquote, urlparse
 
@@ -24,6 +22,35 @@ from aws_lambda_powertools.utilities.data_classes import LambdaFunctionUrlEvent
 from aws_lambda_powertools.utilities.typing import LambdaContext
 
 from .awsssm import retrieve_ssm_parameters
+from .constants import (
+    BIRTHDATE_CONFIRMATION_TWIML_FILE_PATH,
+    BIRTHDATE_CONFIRMED_TWIML_FILE_PATH,
+    BIRTHDATE_DIGIT_LENGTH,
+    BIRTHDATE_INVALID_INPUT_TWIML_FILE_PATH,
+    BIRTHDATE_RETRY_TWIML_FILE_PATH,
+    BIRTHDATE_TWIML_FILE_PATH,
+    CONNECT_TWIML_FILE_PATH,
+    CONTENT_TYPE_XML,
+    DIAL_TWIML_FILE_PATH,
+    DTMF_OPERATOR_TRANSFER,
+    DTMF_VOICE_ASSISTANT,
+    ENV_TYPE,
+    ERROR_BIRTHDATE_DIGITS_NOT_FOUND,
+    ERROR_CALL_NUMBER_NOT_FOUND,
+    ERROR_DIGITS_NOT_FOUND,
+    FORM_PARAM_FROM,
+    GATHER_TWIML_FILE_PATH,
+    HANGUP_TWIML_FILE_PATH,
+    HTTPS_SCHEME,
+    PROCESS_BIRTHDATE_PATH,
+    SSM_MEDIA_API_URL,
+    SSM_OPERATOR_PHONE_NUMBER,
+    SSM_TWILIO_AUTH_TOKEN,
+    SSM_WEBHOOK_API_URL,
+    SYSTEM_NAME,
+    TRANSFER_CALL_ENDPOINT,
+    TWIML_DIR,
+)
 from .twilio import validate_http_twilio_signature
 from .xml import (
     convert_xml_root_to_string,
@@ -34,14 +61,6 @@ from .xml import (
 logger = Logger()
 tracer = Tracer()
 app = LambdaFunctionUrlResolver()
-
-_SYSTEM_NAME = os.getenv("SYSTEM_NAME", "twh")
-_ENV_TYPE = os.getenv("ENV_TYPE", "dev")
-_TWIML_DIR = Path(__file__).parent.parent / "twiml"
-_CONNECT_TWIML_FILE_PATH: str = str(_TWIML_DIR / "connect.twiml.xml")
-_DIAL_TWIML_FILE_PATH: str = str(_TWIML_DIR / "dial.twiml.xml")
-_GATHER_TWIML_FILE_PATH: str = str(_TWIML_DIR / "gather.twiml.xml")
-_HANGUP_TWIML_FILE_PATH: str = str(_TWIML_DIR / "hangup.twiml.xml")
 
 
 @app.get("/health")
@@ -79,47 +98,47 @@ def transfer_call(country_code: str = "US") -> Response[str]:
     """
     digits = app.current_event["queryStringParameters"].get("digits")
     if not digits:
-        error_message = "Digits not found in the request body"
+        error_message = ERROR_DIGITS_NOT_FOUND
         logger.error(error_message)
         raise BadRequestError(error_message)
     parameter_names = {
-        k: f"/{_SYSTEM_NAME}/{_ENV_TYPE}/{k}"
+        k: f"/{SYSTEM_NAME}/{ENV_TYPE}/{k}"
         for k in [
-            "twilio-auth-token",
-            "media-api-url",
-            "operator-phone-number",
+            SSM_TWILIO_AUTH_TOKEN,
+            SSM_MEDIA_API_URL,
+            SSM_OPERATOR_PHONE_NUMBER,
         ]
     }
     try:
         parameters = retrieve_ssm_parameters(*parameter_names.values())
         validate_http_twilio_signature(
-            token=parameters[parameter_names["twilio-auth-token"]],
+            token=parameters[parameter_names[SSM_TWILIO_AUTH_TOKEN]],
             event=app.current_event,
         )
         logger.info("Call transfer")
-        if digits == "1":
-            root = parse_xml_and_extract_root(xml_file_path=_CONNECT_TWIML_FILE_PATH)
+        if digits == DTMF_VOICE_ASSISTANT:
+            root = parse_xml_and_extract_root(xml_file_path=CONNECT_TWIML_FILE_PATH)
             caller_phone_number = _fetch_caller_phone_number_from_request(
                 event=app.current_event
             )
             stream = find_xml_element(root=root, namespaces="./Connect/Stream")
-            stream.set("url", parameters[parameter_names["media-api-url"]])
+            stream.set("url", parameters[parameter_names[SSM_MEDIA_API_URL]])
             parameter_from = find_xml_element(
-                root=stream, namespaces="./Parameter[@name='From']"
+                root=stream, namespaces=f"./Parameter[@name='{FORM_PARAM_FROM}']"
             )
             parameter_from.set("value", caller_phone_number)
-        elif digits == "2":
-            root = parse_xml_and_extract_root(xml_file_path=_DIAL_TWIML_FILE_PATH)
+        elif digits == DTMF_OPERATOR_TRANSFER:
+            root = parse_xml_and_extract_root(xml_file_path=DIAL_TWIML_FILE_PATH)
             dial = find_xml_element(root=root, namespaces="./Dial")
             dial.text = phonenumbers.format_number(
                 phonenumbers.parse(
-                    parameters[parameter_names["operator-phone-number"]],
+                    parameters[parameter_names[SSM_OPERATOR_PHONE_NUMBER]],
                     country_code,
                 ),
                 phonenumbers.PhoneNumberFormat.E164,
             )
         else:
-            root = parse_xml_and_extract_root(xml_file_path=_HANGUP_TWIML_FILE_PATH)
+            root = parse_xml_and_extract_root(xml_file_path=HANGUP_TWIML_FILE_PATH)
         twiml = convert_xml_root_to_string(root=root, logger=logger)
     except (BadRequestError, UnauthorizedError) as e:
         logger.exception(e.msg)
@@ -131,7 +150,7 @@ def transfer_call(country_code: str = "US") -> Response[str]:
     else:
         return Response(
             status_code=HTTPStatus.OK,
-            content_type="application/xml",
+            content_type=CONTENT_TYPE_XML,
             body=twiml,
         )
 
@@ -153,7 +172,7 @@ def handle_incoming_call(twiml_file_stem: str) -> Response[str]:
         UnauthorizedError: If the request signature is invalid.
 
     """
-    twiml_file = _TWIML_DIR / f"{twiml_file_stem}.twiml.xml"
+    twiml_file = TWIML_DIR / f"{twiml_file_stem}.twiml.xml"
     if not twiml_file.exists():
         error_message = f"Invalid TwiML file: {twiml_file}"
         logger.error(error_message)
@@ -162,17 +181,17 @@ def handle_incoming_call(twiml_file_stem: str) -> Response[str]:
         event=app.current_event
     )
     parameter_names = {
-        k: f"/{_SYSTEM_NAME}/{_ENV_TYPE}/{k}"
+        k: f"/{SYSTEM_NAME}/{ENV_TYPE}/{k}"
         for k in [
-            "twilio-auth-token",
-            "media-api-url",
-            "webhook-api-url",
+            SSM_TWILIO_AUTH_TOKEN,
+            SSM_MEDIA_API_URL,
+            SSM_WEBHOOK_API_URL,
         ]
     }
     try:
         parameters = retrieve_ssm_parameters(*parameter_names.values())
         validate_http_twilio_signature(
-            token=parameters[parameter_names["twilio-auth-token"]],
+            token=parameters[parameter_names[SSM_TWILIO_AUTH_TOKEN]],
             event=app.current_event,
         )
     except (BadRequestError, UnauthorizedError) as e:
@@ -186,8 +205,8 @@ def handle_incoming_call(twiml_file_stem: str) -> Response[str]:
         return _respond_to_call(
             twiml_file_path=str(twiml_file),
             caller_phone_number=caller_phone_number,
-            media_api_url=parameters[parameter_names["media-api-url"]],
-            webhook_api_url=parameters[parameter_names["webhook-api-url"]],
+            media_api_url=parameters[parameter_names[SSM_MEDIA_API_URL]],
+            webhook_api_url=parameters[parameter_names[SSM_WEBHOOK_API_URL]],
         )
 
 
@@ -211,24 +230,73 @@ def _respond_to_call(
     """
     logger.info("Responding to call")
     root = parse_xml_and_extract_root(xml_file_path=twiml_file_path)
-    if twiml_file_path == _CONNECT_TWIML_FILE_PATH:
+    if twiml_file_path == CONNECT_TWIML_FILE_PATH:
         stream = find_xml_element(root=root, namespaces="./Connect/Stream")
         stream.set("url", media_api_url)
         parameter_from = find_xml_element(
-            root=root, namespaces="./Connect/Stream/Parameter[@name='From']"
+            root=root,
+            namespaces=f"./Connect/Stream/Parameter[@name='{FORM_PARAM_FROM}']",
         )
         parameter_from.set("value", caller_phone_number)
-    elif twiml_file_path == _GATHER_TWIML_FILE_PATH:
+    elif twiml_file_path == GATHER_TWIML_FILE_PATH:
         gather = find_xml_element(root=root, namespaces="./Gather")
         webhook_api_fqdn = urlparse(webhook_api_url).netloc
-        transfer_api_url = f"https://{webhook_api_fqdn}/transfer-call"
+        transfer_api_url = f"{HTTPS_SCHEME}{webhook_api_fqdn}{TRANSFER_CALL_ENDPOINT}"
         logger.info("transfer_api_url: %s", transfer_api_url)
         gather.set("action", transfer_api_url)
+    elif twiml_file_path == BIRTHDATE_TWIML_FILE_PATH:
+        gather = find_xml_element(root=root, namespaces="./Gather")
+        webhook_api_fqdn = urlparse(webhook_api_url).netloc
+        process_birthdate_url = (
+            f"{HTTPS_SCHEME}{webhook_api_fqdn}{PROCESS_BIRTHDATE_PATH}"
+        )
+        logger.info("process_birthdate_url: %s", process_birthdate_url)
+        gather.set("action", process_birthdate_url)
+        # Set the redirect URL for retry
+        redirect = find_xml_element(root=root, namespaces="./Redirect")
+        current_url = urlparse(webhook_api_url).path
+        if current_url:
+            redirect.text = f"{HTTPS_SCHEME}{webhook_api_fqdn}{current_url}"
     return Response(
         status_code=HTTPStatus.OK,
         content_type="application/xml",
         body=convert_xml_root_to_string(root=root, logger=logger),
     )
+
+
+def _build_webhook_urls(webhook_api_url: str) -> dict[str, str]:
+    """Build all webhook URLs needed for birthdate processing.
+
+    Args:
+        webhook_api_url (str): The base webhook API URL.
+
+    Returns:
+        dict[str, str]: Dictionary containing all built URLs.
+
+    """
+    webhook_fqdn = urlparse(webhook_api_url).netloc
+    return {
+        "fqdn": webhook_fqdn,
+        "confirm": f"{HTTPS_SCHEME}{webhook_fqdn}/confirm-birthdate",
+        "birthdate_entry": f"{HTTPS_SCHEME}{webhook_fqdn}/incoming-call/birthdate",
+    }
+
+
+def _parse_birthdate_digits(digits: str) -> dict[str, str]:
+    """Parse birthdate digits into year, month, day components.
+
+    Args:
+        digits (str): 8-digit birthdate string (YYYYMMDD).
+
+    Returns:
+        dict[str, str]: Dictionary with year, month, day keys.
+
+    """
+    return {
+        "year": digits[:4],
+        "month": digits[4:6],
+        "day": digits[6:8],
+    }
 
 
 def _fetch_caller_phone_number_from_request(event: LambdaFunctionUrlEvent) -> str:
@@ -249,12 +317,12 @@ def _fetch_caller_phone_number_from_request(event: LambdaFunctionUrlEvent) -> st
         for kv in event.decoded_body.split("&"):
             if "=" in kv:
                 k, v = kv.split("=", 1)
-                if unquote(k) == "From":
+                if unquote(k) == FORM_PARAM_FROM:
                     caller_phone_number = unquote(v)
                     break
     logger.info("caller_phone_number: %s", caller_phone_number)
     if not caller_phone_number:
-        error_message = "Call number not found in the request body"
+        error_message = ERROR_CALL_NUMBER_NOT_FOUND
         raise BadRequestError(error_message)
     return caller_phone_number
 
@@ -280,3 +348,186 @@ def lambda_handler(event: dict[str, Any], context: LambdaContext) -> dict[str, A
     """
     logger.info("Event received")
     return app.resolve(event=event, context=context)
+
+
+@app.post("/process-birthdate")
+@tracer.capture_method
+def process_birthdate() -> Response[str]:
+    """Process birth date input and return TwiML response.
+
+    Returns:
+        Response[str]: TwiML response after processing birth date.
+
+    Raises:
+        BadRequestError: If the birth date is missing or invalid.
+        UnauthorizedError: If the request signature is invalid.
+        InternalServerError: If there's an error processing the request.
+
+    """
+    digits = app.current_event["queryStringParameters"].get("digits")
+    if not digits:
+        logger.error(ERROR_BIRTHDATE_DIGITS_NOT_FOUND)
+        raise BadRequestError(ERROR_BIRTHDATE_DIGITS_NOT_FOUND)
+
+    if len(digits) != BIRTHDATE_DIGIT_LENGTH or not digits.isdigit():
+        error_message = (
+            f"Invalid birth date format: {digits}. "
+            f"Expected YYYYMMDD ({BIRTHDATE_DIGIT_LENGTH} digits)."
+        )
+        logger.error(error_message)
+        raise BadRequestError(error_message)
+
+    parameter_names = {
+        k: f"/{SYSTEM_NAME}/{ENV_TYPE}/{k}"
+        for k in [SSM_TWILIO_AUTH_TOKEN, SSM_WEBHOOK_API_URL]
+    }
+
+    try:
+        parameters = retrieve_ssm_parameters(*parameter_names.values())
+        validate_http_twilio_signature(
+            token=parameters[parameter_names[SSM_TWILIO_AUTH_TOKEN]],
+            event=app.current_event,
+        )
+
+        date_parts = _parse_birthdate_digits(digits)
+        logger.info(
+            "Received birth date: %s-%s-%s",
+            date_parts["year"],
+            date_parts["month"],
+            date_parts["day"],
+        )
+
+        webhook_api_url = parameters[parameter_names[SSM_WEBHOOK_API_URL]]
+        urls = _build_webhook_urls(webhook_api_url)
+
+        # Use template for confirmation prompt
+        root = parse_xml_and_extract_root(
+            xml_file_path=BIRTHDATE_CONFIRMATION_TWIML_FILE_PATH
+        )
+
+        # Update the Say element with actual birthdate
+        say = find_xml_element(root=root, namespaces="./Say")
+        say.text = (
+            f"You entered {date_parts['month']} {date_parts['day']}, "
+            f"{date_parts['year']} as your birth date. "
+            f"Press 1 to confirm, or press 2 to re-enter your birth date."
+        )
+
+        # Update the Gather action URL
+        gather = find_xml_element(root=root, namespaces="./Gather")
+        gather.set("action", f"{urls['confirm']}?birthdate={digits}")
+
+        # Update the Redirect URL
+        redirect = find_xml_element(root=root, namespaces="./Redirect")
+        redirect.text = urls["birthdate_entry"]
+
+        twiml = convert_xml_root_to_string(root=root, logger=logger)
+    except (BadRequestError, UnauthorizedError) as e:
+        logger.exception(e.msg)
+        raise
+    except Exception as e:
+        error_message = str(e)
+        logger.exception(error_message)
+        raise InternalServerError(error_message) from e
+    else:
+        return Response(
+            status_code=HTTPStatus.OK,
+            content_type=CONTENT_TYPE_XML,
+            body=twiml,
+        )
+
+
+@app.post("/confirm-birthdate")
+@tracer.capture_method
+def confirm_birthdate() -> Response[str]:
+    """Handle birthdate confirmation and return TwiML response.
+
+    Returns:
+        Response[str]: TwiML response after processing confirmation.
+
+    Raises:
+        BadRequestError: If the confirmation input is missing or invalid.
+        UnauthorizedError: If the request signature is invalid.
+        InternalServerError: If there's an error processing the request.
+
+    """
+    query_params = app.current_event["queryStringParameters"]
+    digits = query_params.get("digits")
+    birthdate = query_params.get("birthdate")
+
+    if not digits:
+        error_message = "Confirmation digits not found in the request"
+        logger.error(error_message)
+        raise BadRequestError(error_message)
+
+    if not birthdate:
+        error_message = "Birthdate parameter not found in the request"
+        logger.error(error_message)
+        raise BadRequestError(error_message)
+
+    parameter_names = {
+        k: f"/{SYSTEM_NAME}/{ENV_TYPE}/{k}"
+        for k in [SSM_TWILIO_AUTH_TOKEN, SSM_WEBHOOK_API_URL]
+    }
+
+    try:
+        parameters = retrieve_ssm_parameters(*parameter_names.values())
+        validate_http_twilio_signature(
+            token=parameters[parameter_names[SSM_TWILIO_AUTH_TOKEN]],
+            event=app.current_event,
+        )
+
+        webhook_api_url = parameters[parameter_names[SSM_WEBHOOK_API_URL]]
+        urls = _build_webhook_urls(webhook_api_url)
+
+        if digits == "1":  # Confirm
+            date_parts = _parse_birthdate_digits(birthdate)
+            logger.info(
+                "Birth date confirmed: %s-%s-%s",
+                date_parts["year"],
+                date_parts["month"],
+                date_parts["day"],
+            )
+            # Use template for confirmed birthdate
+            root = parse_xml_and_extract_root(
+                xml_file_path=BIRTHDATE_CONFIRMED_TWIML_FILE_PATH
+            )
+            say = find_xml_element(root=root, namespaces="./Say")
+            say.text = (
+                f"Thank you. We have recorded your birth date as "
+                f"{date_parts['month']} {date_parts['day']}, "
+                f"{date_parts['year']}. Goodbye!"
+            )
+        elif digits == "2":  # Re-enter
+            logger.info("User chose to re-enter birth date")
+            # Use template for retry
+            root = parse_xml_and_extract_root(
+                xml_file_path=BIRTHDATE_RETRY_TWIML_FILE_PATH
+            )
+            redirect = find_xml_element(root=root, namespaces="./Redirect")
+            redirect.text = urls["birthdate_entry"]
+        else:  # Invalid input
+            logger.warning("Invalid confirmation input: %s", digits)
+            # Use template for invalid input
+            root = parse_xml_and_extract_root(
+                xml_file_path=BIRTHDATE_INVALID_INPUT_TWIML_FILE_PATH
+            )
+            gather = find_xml_element(root=root, namespaces="./Gather")
+            gather.set("action", f"{urls['confirm']}?birthdate={birthdate}")
+            redirect = find_xml_element(root=root, namespaces="./Redirect")
+            redirect.text = urls["birthdate_entry"]
+
+        twiml = convert_xml_root_to_string(root=root, logger=logger)
+    except (BadRequestError, UnauthorizedError) as e:
+        logger.exception(e.msg)
+        raise
+    except Exception as e:
+        error_message = str(e)
+        logger.exception(error_message)
+        raise InternalServerError(error_message) from e
+    else:
+        return Response(
+            status_code=HTTPStatus.OK,
+            content_type=CONTENT_TYPE_XML,
+            body=twiml,
+        )

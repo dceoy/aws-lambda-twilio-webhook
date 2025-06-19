@@ -13,8 +13,8 @@ from twiliowebhook.api.awsssm import retrieve_ssm_parameters
 @mock_aws
 def test_retrieve_ssm_parameters(mocker: MockFixture) -> None:
     test_parameters: dict[str, str] = {
-        "/test/mock/twilio-auth-token": "test-token",
-        "/test/mock/media-api-url": "wss://api.example.com",
+        "/twh/dev/twilio-auth-token": "test-token",
+        "/twh/dev/media-api-url": "wss://api.example.com",
     }
     ssm = boto3.client("ssm", region_name="us-west-2")
     mocker.patch("twiliowebhook.api.awsssm.boto3.client", return_value=ssm)
@@ -31,8 +31,8 @@ def test_retrieve_ssm_parameters(mocker: MockFixture) -> None:
     )
     params: dict[str, str] = retrieve_ssm_parameters(*test_parameters.keys())
     assert params == {
-        "/test/mock/twilio-auth-token": "test-token",
-        "/test/mock/media-api-url": "wss://api.example.com",
+        "/twh/dev/twilio-auth-token": "test-token",
+        "/twh/dev/media-api-url": "wss://api.example.com",
     }
 
 
