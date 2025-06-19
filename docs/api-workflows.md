@@ -6,7 +6,7 @@ This document contains Mermaid diagrams showing the workflow for each API endpoi
 
 ```mermaid
 flowchart TD
-    A[GET /health] --> B[check_health()]
+    A[GET /health] --> B[check_health]
     B --> C[Return JSON Response]
     C --> D["Success message JSON"]
     D --> E[HTTP 200 OK]
