@@ -34,6 +34,7 @@ from twiliowebhook.api.main import (
     check_health,
     handle_incoming_call,
     lambda_handler,
+    monitor_call,
     transfer_call,
 )
 
@@ -352,3 +353,165 @@ def test_handle_incoming_call_invalid_twiml_file_stem(mocker: MockerFixture) -> 
         BadRequestError, match="Call number not found in the request body"
     ):
         _fetch_caller_phone_number_from_request(event=LambdaFunctionUrlEvent({}))
+
+
+def test_monitor_call_success(mocker: MockerFixture) -> None:
+    call_sid = "CA1234567890abcdef1234567890abcdef"
+
+    # Mock SSM parameters
+    mock_retrieve_ssm_parameters = mocker.patch(
+        "twiliowebhook.api.main.retrieve_ssm_parameters",
+        return_value={
+            "/twh/dev/twilio-account-sid": "test-account-sid",
+            "/twh/dev/twilio-auth-token": "test-token",
+        },
+    )
+
+    # Mock Twilio client and call object
+    mock_call = mocker.MagicMock()
+    mock_call.to_dict.return_value = {
+        "sid": call_sid,
+        "from": "+1234567890",
+        "to": "+0987654321",
+        "status": "completed",
+        "direction": "inbound",
+        "duration": "120",
+        "price": "-0.02",
+        "price_unit": "USD",
+        "start_time": "2023-01-01T12:00:00Z",
+        "end_time": "2023-01-01T12:02:00Z",
+        "answered_by": "human",
+        "forwarded_from": None,
+        "caller_name": "Test Caller",
+        "parent_call_sid": None,
+        "queue_time": "0",
+    }
+
+    mock_calls = mocker.MagicMock()
+    mock_calls.return_value.fetch.return_value = mock_call
+
+    mock_client = mocker.MagicMock()
+    mock_client.calls = mock_calls
+
+    mock_client_class = mocker.patch(
+        "twiliowebhook.api.main.Client", return_value=mock_client
+    )
+
+    response = monitor_call(call_sid)
+
+    # Verify SSM parameters were retrieved
+    mock_retrieve_ssm_parameters.assert_called_once_with(
+        "/twh/dev/twilio-account-sid",
+        "/twh/dev/twilio-auth-token",
+    )
+
+    # Verify Twilio client was initialized correctly
+    mock_client_class.assert_called_once_with(
+        username="test-account-sid", password="test-token"
+    )
+
+    # Verify call fetch was called
+    mock_calls.assert_called_once_with(call_sid)
+    mock_calls.return_value.fetch.assert_called_once()
+
+    # Verify response
+    assert response.status_code == HTTPStatus.OK
+    assert response.content_type == content_types.APPLICATION_JSON
+    assert response.body is not None
+
+    body = json.loads(response.body)
+    assert body["sid"] == call_sid
+    assert body["from"] == "+1234567890"
+    assert body["to"] == "+0987654321"
+    assert body["status"] == "completed"
+    assert body["start_time"] == "2023-01-01T12:00:00Z"
+
+
+def test_monitor_call_not_found(mocker: MockerFixture) -> None:
+    call_sid = "CA1234567890abcdef1234567890abcdef"
+
+    # Mock SSM parameters
+    mocker.patch(
+        "twiliowebhook.api.main.retrieve_ssm_parameters",
+        return_value={
+            "/twh/dev/twilio-account-sid": "test-account-sid",
+            "/twh/dev/twilio-auth-token": "test-token",
+        },
+    )
+
+    # Import the real exception class
+    from twilio.base.exceptions import TwilioRestException  # noqa: PLC0415
+
+    # Create a mock exception instance with the expected attributes
+    mock_exception = TwilioRestException(
+        404, "https://api.twilio.com", "Call not found", 20404
+    )
+    mock_exception.code = 20404
+    mock_exception.msg = "Call not found"
+
+    # Mock client to raise exception
+    mock_client = mocker.MagicMock()
+    mock_client.calls.return_value.fetch.side_effect = mock_exception
+
+    mocker.patch("twiliowebhook.api.main.Client", return_value=mock_client)
+
+    # Mock logger
+    mock_logger_exception = mocker.patch("twiliowebhook.api.main.logger.exception")
+
+    with pytest.raises(BadRequestError, match=f"Call not found: {call_sid}"):
+        monitor_call(call_sid)
+
+    mock_logger_exception.assert_called_once_with(f"Call not found: {call_sid}")
+
+
+def test_monitor_call_twilio_error(mocker: MockerFixture) -> None:
+    call_sid = "CA1234567890abcdef1234567890abcdef"
+
+    # Mock SSM parameters
+    mocker.patch(
+        "twiliowebhook.api.main.retrieve_ssm_parameters",
+        return_value={
+            "/twh/dev/twilio-account-sid": "test-account-sid",
+            "/twh/dev/twilio-auth-token": "test-token",
+        },
+    )
+
+    # Import and mock TwilioRestException for other errors
+    from twilio.base.exceptions import TwilioRestException  # noqa: PLC0415
+
+    # Mock client to raise exception
+    mock_client = mocker.MagicMock()
+    mock_client.calls.return_value.fetch.side_effect = TwilioRestException(
+        500, "https://api.twilio.com", "Internal Server Error", 30001
+    )
+
+    mocker.patch("twiliowebhook.api.main.Client", return_value=mock_client)
+
+    # Mock logger
+    mock_logger_exception = mocker.patch("twiliowebhook.api.main.logger.exception")
+
+    msg = "Twilio API error: Internal Server Error"
+    with pytest.raises(InternalServerError, match=msg):
+        monitor_call(call_sid)
+
+    mock_logger_exception.assert_called_once_with(msg)
+
+
+def test_monitor_call_ssm_error(mocker: MockerFixture) -> None:
+    call_sid = "CA1234567890abcdef1234567890abcdef"
+    error_message = "SSM parameter not found"
+
+    # Mock SSM parameters to raise ValueError
+    mocker.patch(
+        "twiliowebhook.api.main.retrieve_ssm_parameters",
+        side_effect=ValueError(error_message),
+    )
+
+    # Mock logger
+    mock_logger_exception = mocker.patch("twiliowebhook.api.main.logger.exception")
+
+    msg = f"Invalid parameter configuration: {error_message}"
+    with pytest.raises(InternalServerError, match=msg):
+        monitor_call(call_sid)
+
+    mock_logger_exception.assert_called_once_with(msg)

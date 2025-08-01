@@ -37,6 +37,7 @@ TWILIO_SIGNATURE_HEADER = "X-Twilio-Signature"
 
 # SSM Parameter Names
 SSM_TWILIO_AUTH_TOKEN = "twilio-auth-token"  # noqa: S105
+SSM_TWILIO_ACCOUNT_SID = "twilio-account-sid"
 SSM_MEDIA_API_URL = "media-api-url"
 SSM_OPERATOR_PHONE_NUMBER = "operator-phone-number"
 SSM_WEBHOOK_API_URL = "webhook-api-url"

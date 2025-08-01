@@ -20,6 +20,8 @@ from aws_lambda_powertools.event_handler.exceptions import (
 from aws_lambda_powertools.logging import correlation_paths
 from aws_lambda_powertools.utilities.data_classes import LambdaFunctionUrlEvent
 from aws_lambda_powertools.utilities.typing import LambdaContext
+from twilio.base.exceptions import TwilioRestException
+from twilio.rest import Client
 
 from .awsssm import retrieve_ssm_parameters
 from .constants import (
@@ -30,6 +32,7 @@ from .constants import (
     BIRTHDATE_RETRY_TWIML_FILE_PATH,
     BIRTHDATE_TWIML_FILE_PATH,
     CONNECT_TWIML_FILE_PATH,
+    CONTENT_TYPE_JSON,
     CONTENT_TYPE_XML,
     DIAL_TWIML_FILE_PATH,
     DTMF_OPERATOR_TRANSFER,
@@ -45,6 +48,7 @@ from .constants import (
     PROCESS_BIRTHDATE_PATH,
     SSM_MEDIA_API_URL,
     SSM_OPERATOR_PHONE_NUMBER,
+    SSM_TWILIO_ACCOUNT_SID,
     SSM_TWILIO_AUTH_TOKEN,
     SSM_WEBHOOK_API_URL,
     SYSTEM_NAME,
@@ -153,6 +157,56 @@ def transfer_call(country_code: str = "US") -> Response[str]:
             content_type=CONTENT_TYPE_XML,
             body=twiml,
         )
+
+
+@app.get("/monitor-call/<call_sid>")
+@tracer.capture_method
+def monitor_call(call_sid: str) -> Response[str]:
+    """Monitor a call and return call details.
+
+    Args:
+        call_sid (str): The SID of the call to monitor.
+
+    Returns:
+        Response[str]: A JSON response with call details.
+
+    Raises:
+        BadRequestError: If the call is not found.
+        InternalServerError: If there's an error fetching call details.
+    """
+    parameter_names = {
+        k: f"/{SYSTEM_NAME}/{ENV_TYPE}/{k}"
+        for k in [SSM_TWILIO_ACCOUNT_SID, SSM_TWILIO_AUTH_TOKEN]
+    }
+    try:
+        parameters = retrieve_ssm_parameters(*parameter_names.values())
+        client = Client(
+            username=parameters[parameter_names[SSM_TWILIO_ACCOUNT_SID]],
+            password=parameters[parameter_names[SSM_TWILIO_AUTH_TOKEN]],
+        )
+        call = client.calls(call_sid).fetch()
+        logger.info("Call details fetched successfully", extra={"call_sid": call_sid})
+        return Response(
+            status_code=HTTPStatus.OK,
+            content_type=CONTENT_TYPE_JSON,
+            body=json.dumps(call.to_dict()),
+        )
+    except TwilioRestException as e:
+        if e.code == 20404:  # noqa: PLR2004
+            error_message = f"Call not found: {call_sid}"
+            logger.exception(error_message)
+            raise BadRequestError(error_message) from e
+        error_message = f"Twilio API error: {e.msg}"
+        logger.exception(error_message)
+        raise InternalServerError(error_message) from e
+    except ValueError as e:
+        error_message = f"Invalid parameter configuration: {e!s}"
+        logger.exception(error_message)
+        raise InternalServerError(error_message) from e
+    except Exception as e:
+        error_message = f"Failed to fetch call details: {e!s}"
+        logger.exception(error_message)
+        raise InternalServerError(error_message) from e
 
 
 @app.post("/incoming-call/<twiml_file_stem>")
