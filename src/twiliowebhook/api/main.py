@@ -413,9 +413,11 @@ def lambda_handler(event: dict[str, Any], context: LambdaContext) -> dict[str, A
 def process_digits(target: str) -> Response[str]:
     """Process the digits entered by the user and return a TwiML response.
 
+    Args:
+        target (str): The target for the digits, expected to be "birthdate".
+
     Returns:
         Response[str]: TwiML response after processing birth date.
-        target (str): The target for the digits, expected to be "birthdate".
 
     Raises:
         BadRequestError: If the birth date is missing or invalid.
