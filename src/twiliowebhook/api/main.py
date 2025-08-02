@@ -505,9 +505,11 @@ def process_digits(target: str) -> Response[str]:
 def confirm_digits(target: str) -> Response[str]:
     """Confirm the digits entered by the user and return a TwiML response.
 
+    Args:
+        target (str): The target for the digits, expected to be "birthdate".
+
     Returns:
         Response[str]: TwiML response after processing confirmation.
-        target (str): The target for the digits, expected to be "birthdate".
 
     Raises:
         BadRequestError: If the confirmation input is missing or invalid.
