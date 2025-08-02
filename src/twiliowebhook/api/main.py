@@ -1,6 +1,7 @@
 """AWS Lambda function handler for incoming webhook from Twilio."""
 
 import json
+from datetime import datetime
 from http import HTTPStatus
 from typing import Any
 from urllib.parse import unquote, urlparse
@@ -46,6 +47,7 @@ from .constants import (
     GATHER_TWIML_FILE_PATH,
     HANGUP_TWIML_FILE_PATH,
     HTTPS_SCHEME,
+    MAX_BATCH_LIMIT,
     PROCESS_BIRTHDATE_PATH,
     SSM_MEDIA_API_URL,
     SSM_OPERATOR_PHONE_NUMBER,
@@ -54,6 +56,7 @@ from .constants import (
     SSM_WEBHOOK_API_URL,
     SYSTEM_NAME,
     TRANSFER_CALL_ENDPOINT,
+    TWILIO_NOT_FOUND_ERROR_CODE,
     TWIML_DIR,
 )
 from .twilio import validate_http_twilio_signature
@@ -194,7 +197,7 @@ def monitor_call(call_sid: str) -> Response[str]:
             body=json.dumps(call.to_dict()),
         )
     except TwilioRestException as e:
-        if e.code == 20404:  # noqa: PLR2004
+        if e.code == TWILIO_NOT_FOUND_ERROR_CODE:
             error_message = f"Call not found: {call_sid}"
             logger.exception(error_message)
             raise BadRequestError(error_message) from e
@@ -207,6 +210,168 @@ def monitor_call(call_sid: str) -> Response[str]:
         raise InternalServerError(error_message) from e
     except Exception as e:
         error_message = f"Failed to fetch call details: {e!s}"
+        logger.exception(error_message)
+        raise InternalServerError(error_message) from e
+
+
+def _validate_batch_monitor_params(query_params: dict[str, Any]) -> dict[str, Any]:
+    """Validate and parse batch monitor call parameters.
+
+    Args:
+        query_params: Query parameters from the request.
+
+    Returns:
+        dict: Validated parameters.
+
+    Raises:
+        BadRequestError: If parameters are invalid.
+    """
+    start_date = query_params.get("start_date")
+    end_date = query_params.get("end_date")
+
+    if not start_date or not end_date:
+        error_message = "Both start_date and end_date are required parameters"
+        logger.error(error_message)
+        raise BadRequestError(error_message)
+
+    # Parse dates - handle both Z suffix and +00:00 format
+    try:
+        start_dt = datetime.fromisoformat(start_date.replace("Z", "+00:00"))  # noqa: FURB162
+        end_dt = datetime.fromisoformat(end_date.replace("Z", "+00:00"))  # noqa: FURB162
+
+        if start_dt > end_dt:
+            error_message = "start_date must be before or equal to end_date"
+            logger.error(error_message)
+            raise BadRequestError(error_message)
+    except (ValueError, TypeError) as e:
+        error_message = f"Invalid date format: {e!s}"
+        logger.exception(error_message)
+        raise BadRequestError(error_message) from e
+
+    # Parse limit
+    limit = int(query_params.get("limit", "100"))
+    if limit <= 0 or limit > MAX_BATCH_LIMIT:
+        error_message = "Limit must be between 1 and 1000"
+        logger.error(error_message)
+        raise BadRequestError(error_message)
+
+    return {
+        "start_date": start_date,
+        "end_date": end_date,
+        "start_dt": start_dt,
+        "end_dt": end_dt,
+        "status": query_params.get("status"),
+        "direction": query_params.get("direction"),
+        "limit": limit,
+        "page_token": query_params.get("page_token"),
+    }
+
+
+def _extract_next_page_token(next_page_url: str | None) -> str | None:
+    """Extract next page token from Twilio's next page URL.
+
+    Args:
+        next_page_url: The next page URL from Twilio.
+
+    Returns:
+        str | None: The extracted page token or None.
+    """
+    if not next_page_url:
+        return None
+    token_part = next_page_url.split("PageToken=")[1]
+    return token_part.split("&")[0]
+
+
+@app.get("/batch-monitor-calls")
+@tracer.capture_method
+def batch_monitor_calls() -> Response[str]:
+    """Monitor multiple calls within a specified date range.
+
+    Query Parameters:
+        start_date (str): Start date in ISO 8601 format (required)
+        end_date (str): End date in ISO 8601 format (required)
+        status (str): Filter by call status (optional)
+        direction (str): Filter by call direction (optional)
+        limit (int): Maximum number of results (optional, default 100)
+        page_token (str): Token for pagination (optional)
+
+    Returns:
+        Response[str]: A JSON response with call details and pagination info.
+
+    Raises:
+        BadRequestError: If required parameters are missing or invalid.
+        InternalServerError: If there's an error fetching call details.
+    """
+    query_params = app.current_event.get("queryStringParameters") or {}
+
+    try:
+        # Validate parameters
+        params = _validate_batch_monitor_params(query_params)
+
+        # Get SSM parameters
+        parameter_names = {
+            k: f"/{SYSTEM_NAME}/{ENV_TYPE}/{k}"
+            for k in [SSM_TWILIO_ACCOUNT_SID, SSM_TWILIO_AUTH_TOKEN]
+        }
+        parameters = retrieve_ssm_parameters(*parameter_names.values())
+
+        # Create Twilio client
+        client = Client(
+            username=parameters[parameter_names[SSM_TWILIO_ACCOUNT_SID]],
+            password=parameters[parameter_names[SSM_TWILIO_AUTH_TOKEN]],
+            http_client=TwilioHttpClient(timeout=30),
+        )
+
+        # Build filter parameters
+        filter_params = {
+            "start_time_after": params["start_dt"],
+            "start_time_before": params["end_dt"],
+            "limit": params["limit"],
+        }
+        if params["status"]:
+            filter_params["status"] = params["status"]
+        if params["direction"]:
+            filter_params["direction"] = params["direction"]
+        if params["page_token"]:
+            filter_params["page_token"] = params["page_token"]
+
+        # Fetch calls from Twilio
+        calls_page = client.calls.page(**filter_params)
+        calls_data = [call.to_dict() for call in calls_page]
+
+        # Build response
+        response_data = {
+            "calls": calls_data,
+            "count": len(calls_data),
+            "next_page_token": _extract_next_page_token(calls_page.next_page_url),
+        }
+
+        logger.info(
+            "Batch call monitoring completed",
+            extra={
+                "start_date": params["start_date"],
+                "end_date": params["end_date"],
+                "count": len(calls_data),
+            },
+        )
+
+        return Response(
+            status_code=HTTPStatus.OK,
+            content_type=CONTENT_TYPE_JSON,
+            body=json.dumps(response_data),
+        )
+    except ValueError as e:
+        error_message = f"Invalid date format or parameter configuration: {e!s}"
+        logger.exception(error_message)
+        raise BadRequestError(error_message) from e
+    except TwilioRestException as e:
+        error_message = f"Twilio API error: {e.msg}"
+        logger.exception(error_message)
+        raise InternalServerError(error_message) from e
+    except BadRequestError:
+        raise
+    except Exception as e:
+        error_message = f"Failed to fetch calls: {e!s}"
         logger.exception(error_message)
         raise InternalServerError(error_message) from e
 
