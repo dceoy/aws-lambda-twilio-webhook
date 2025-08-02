@@ -2,6 +2,18 @@
 
 This document contains Mermaid diagrams showing the workflow for each API endpoint in the Twilio webhook Lambda function.
 
+## Overview
+
+The Twilio webhook Lambda function provides a comprehensive set of endpoints for handling voice calls, monitoring call status, and managing interactive voice response (IVR) flows. The API includes:
+
+- **Health Check** - Basic endpoint for monitoring Lambda function status
+- **Call Handling** - Process incoming calls with TwiML templates
+- **Call Transfer** - Route calls based on DTMF input
+- **Call Monitoring** - Retrieve individual and batch call information
+- **Digit Processing** - Handle user input for features like birthdate collection
+
+All POST endpoints require Twilio signature validation for security, while GET endpoints are designed for internal monitoring and reporting.
+
 ## Health Check Endpoint
 
 ```mermaid
@@ -39,11 +51,57 @@ flowchart TD
     C --> R[SSM Parameters:<br/>- twilio-auth-token<br/>- media-api-url<br/>- operator-phone-number]
 ```
 
+## Monitor Call Endpoint
+
+```mermaid
+flowchart TD
+    A["GET /monitor-call/{call_sid}"] --> B[Retrieve SSM parameters]
+    B --> C[Get Twilio credentials]
+    C --> D[Create Twilio client with timeout]
+    D --> E[Fetch call details]
+    E --> F{Call found?}
+    F -->|No| G[HTTP 404 Bad Request]
+    F -->|Yes| H[Return call details JSON]
+    H --> I[HTTP 200 OK]
+    
+    E --> J{Twilio API error?}
+    J -->|Yes| K{Error code 20404?}
+    K -->|Yes| G
+    K -->|No| L[HTTP 500 Internal Server Error]
+    
+    B --> M[SSM Parameters:<br/>- twilio-account-sid<br/>- twilio-auth-token]
+```
+
+## Batch Monitor Calls Endpoint
+
+```mermaid
+flowchart TD
+    A["GET /batch-monitor-calls"] --> B[Extract query parameters]
+    B --> C[Validate parameters]
+    C --> D{Valid parameters?}
+    D -->|No| E[HTTP 400 Bad Request]
+    D -->|Yes| F[Retrieve SSM parameters]
+    F --> G[Create Twilio client]
+    G --> H[Build filter parameters]
+    H --> I[Fetch calls from Twilio]
+    I --> J[Format response with pagination]
+    J --> K[Return JSON response]
+    K --> L[HTTP 200 OK]
+    
+    C --> M[Validation checks:<br/>- start_date required<br/>- end_date required<br/>- Valid date format<br/>- start_date <= end_date<br/>- limit 1-1000]
+    
+    H --> N[Optional filters:<br/>- status<br/>- direction<br/>- page_token]
+    
+    J --> O[Response includes:<br/>- calls array<br/>- count<br/>- next_page_token]
+    
+    F --> P[SSM Parameters:<br/>- twilio-account-sid<br/>- twilio-auth-token]
+```
+
 ## Incoming Call Endpoint
 
 ```mermaid
 flowchart TD
-    A["POST /incoming-call/{twiml_file_stem}"] --> B[Validate template exists]
+    A["POST /handle-incoming-call/{twiml_file_stem}"] --> B[Validate template exists]
     B --> C{Template found?}
     C -->|No| D[HTTP 404 Not Found]
     C -->|Yes| E[Extract caller phone number]

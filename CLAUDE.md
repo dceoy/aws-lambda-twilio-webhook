@@ -57,12 +57,29 @@ This is an AWS Lambda function that handles Twilio webhooks for voice calls. The
 
 1. **Lambda Handler** (`src/twiliowebhook/api/main.py`): 
    - Implements URL routing for Lambda Function URLs
-   - Three endpoints: `/health` (GET), `/transfer-call` (POST), `/incoming-call/{twiml_file_stem}` (POST)
+   - Endpoints:
+     - `/health` (GET) - Health check
+     - `/transfer-call` (POST) - Process DTMF input for call routing
+     - `/handle-incoming-call/{twiml_file_stem}` (POST) - Handle incoming calls with TwiML templates
+     - `/monitor-call/{call_sid}` (GET) - Retrieve individual call details
+     - `/batch-monitor-calls` (GET) - Retrieve multiple calls with pagination
+     - `/process-digits/{target}` (POST) - Process user input (e.g., birthdate)
+     - `/confirm-digits/{target}` (POST) - Confirm user input
    - Uses AWS Lambda Powertools for logging and tracing
+   - Integrates Twilio REST API client for call monitoring
 
 2. **TwiML Templates** (`src/twiliowebhook/twiml/`):
    - XML templates for Twilio responses
-   - Templates: `connect.twiml.xml` (voice assistant), `dial.twiml.xml` (operator transfer), `gather.twiml.xml` (IVR menu), `hangup.twiml.xml`
+   - Templates: 
+     - `connect.twiml.xml` - Connect to voice assistant
+     - `dial.twiml.xml` - Operator transfer
+     - `gather.twiml.xml` - IVR menu with DTMF collection
+     - `hangup.twiml.xml` - Call termination
+     - `birthdate.twiml.xml` - Birthdate input collection
+     - `birthdate-confirmation.twiml.xml` - Birthdate confirmation prompt
+     - `birthdate-confirmed.twiml.xml` - Successful birthdate confirmation
+     - `birthdate-retry.twiml.xml` - Retry birthdate entry
+     - `birthdate-invalid-input.twiml.xml` - Invalid confirmation input
    - Templates support dynamic value injection via placeholders
 
 3. **Security Layer**:
@@ -73,11 +90,15 @@ This is an AWS Lambda function that handles Twilio webhooks for voice calls. The
 ### Request Flow
 
 1. Twilio sends webhook to Lambda Function URL
-2. Lambda handler validates Twilio signature
-3. For incoming calls: Loads appropriate TwiML template based on URL parameter
-4. For call transfers: Processes DTMF input and routes accordingly
-5. Dynamic values (phone numbers, media URLs) are retrieved from AWS SSM and injected into templates
-6. Returns TwiML XML response to Twilio
+2. Lambda handler validates Twilio signature (for POST requests)
+3. Request routing based on endpoint:
+   - **Incoming calls**: Loads appropriate TwiML template based on URL parameter
+   - **Call transfers**: Processes DTMF input and routes to voice assistant or operator
+   - **Call monitoring**: Fetches call details from Twilio API
+   - **Digit processing**: Validates user input and returns appropriate TwiML response
+   - **Digit confirmation**: Handles user confirmation/retry logic
+4. Dynamic values (phone numbers, media URLs) are retrieved from AWS SSM and injected into templates
+5. Returns appropriate response (TwiML XML for webhooks, JSON for monitoring endpoints)
 
 ### Key Design Patterns
 
@@ -86,6 +107,10 @@ This is an AWS Lambda function that handles Twilio webhooks for voice calls. The
 - **Structured logging**: Correlation IDs and structured logs for observability
 - **Type safety**: Strict type checking with Pyright and comprehensive type hints
 - **Container deployment**: Runs as containerized Lambda function on ARM64 (Graviton)
+- **RESTful API design**: Clean URL patterns with path parameters and query strings
+- **Pagination support**: Efficient handling of large result sets with token-based pagination
+- **Input validation**: Comprehensive validation for dates, phone numbers, and user input
+- **Error handling**: Proper HTTP status codes and meaningful error messages
 
 ## Testing Approach
 

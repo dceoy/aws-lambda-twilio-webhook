@@ -12,6 +12,9 @@ A secure, containerized AWS Lambda function for handling Twilio webhooks with vo
 - **Interactive Voice Response (IVR)**: DTMF input collection with customizable prompts
 - **Operator Transfer**: Seamless call routing to human operators
 - **Birthdate Collection**: Specialized flows for gathering and validating user birthdate information
+- **Call Monitoring**: Real-time call status monitoring and historical call data retrieval
+- **Batch Call Processing**: Paginated retrieval of call history with flexible filtering options
+- **Twilio API Integration**: Direct integration with Twilio REST API for call management
 - **AWS Integration**: Secure configuration management using AWS Systems Manager Parameter Store
 - **Containerized Deployment**: ARM64 optimized Docker container for AWS Lambda
 - **Observability**: Structured logging with AWS Lambda Powertools and X-Ray tracing
@@ -55,7 +58,7 @@ Returns health status of the Lambda function.
 
 #### Incoming Call Handler
 ```http
-POST /incoming-call/{twiml_file_stem}
+POST /handle-incoming-call/{twiml_file_stem}
 ```
 Handles incoming Twilio voice calls and returns appropriate TwiML responses based on the template specified in `twiml_file_stem`.
 
@@ -72,13 +75,64 @@ POST /transfer-call
 ```
 Processes DTMF input from IVR interactions and routes calls accordingly.
 
+#### Call Monitoring
+```http
+GET /monitor-call/{call_sid}
+```
+Retrieves detailed information about a specific call using its SID.
+
+**Response:** JSON object containing call details including status, duration, from/to numbers, and other call metadata.
+
+#### Batch Call Monitoring
+```http
+GET /batch-monitor-calls
+```
+Retrieves multiple calls within a specified date range with pagination support.
+
+**Query Parameters:**
+- `start_date` (required) - Start date in ISO 8601 format (e.g., 2024-01-01T00:00:00Z)
+- `end_date` (required) - End date in ISO 8601 format
+- `status` (optional) - Filter by call status (e.g., completed, busy, failed, no-answer)
+- `direction` (optional) - Filter by call direction (inbound, outbound-api, outbound-dial)
+- `limit` (optional) - Maximum number of results per page (default: 100, max: 1000)
+- `page_token` (optional) - Token for pagination
+
+**Response:** JSON object containing:
+- `calls` - Array of call details
+- `count` - Number of calls in current page
+- `next_page_token` - Token for next page (if available)
+
+#### Process Digits Handler
+```http
+POST /process-digits/{target}
+```
+Processes user input digits. Currently supports `birthdate` as the target.
+
+**For birthdate processing:**
+- Accepts 8-digit input in YYYYMMDD format
+- Returns TwiML with confirmation prompt
+- Validates date format and provides appropriate error messages
+
+#### Confirm Digits Handler
+```http
+POST /confirm-digits/{target}
+```
+Handles user confirmation of previously entered digits. Currently supports `birthdate` as the target.
+
+**For birthdate confirmation:**
+- Press 1 to confirm the entered birthdate
+- Press 2 to re-enter the birthdate
+- Any other input triggers an invalid input message
+
 ### Configuration
 
 The application uses AWS Systems Manager Parameter Store for secure configuration management. Required parameters include:
 
-- Twilio authentication token
-- Phone numbers for call routing
-- Media URLs for voice prompts
+- `twilio-auth-token` - Twilio authentication token for request validation
+- `twilio-account-sid` - Twilio account SID for API access
+- `operator-phone-number` - Phone number for operator transfers
+- `media-api-url` - URL for media streaming service
+- `webhook-api-url` - Base URL for webhook callbacks
 - Other service-specific configurations
 
 ### TwiML Templates
@@ -167,6 +221,8 @@ docker buildx bake
 Required environment variables for the Lambda function:
 - `AWS_REGION` - AWS region for SSM Parameter Store access
 - `LOG_LEVEL` - Logging level (DEBUG, INFO, WARN, ERROR)
+- `SYSTEM_NAME` - System identifier for SSM parameter paths (default: "twh")
+- `ENV_TYPE` - Environment type for SSM parameter paths (default: "dev")
 
 ## Architecture
 
