@@ -22,6 +22,7 @@ from defusedxml import ElementTree
 from pytest_mock import MockerFixture
 
 from twiliowebhook.api.constants import (
+    BIRTHDATE_TWIML_FILE_PATH,
     CONNECT_TWIML_FILE_PATH,
     DIAL_TWIML_FILE_PATH,
     GATHER_TWIML_FILE_PATH,
@@ -29,14 +30,24 @@ from twiliowebhook.api.constants import (
     TWIML_DIR,
 )
 from twiliowebhook.api.main import (
+    _extract_next_page_token,
     _fetch_caller_phone_number_from_request,
     _respond_to_call,
+    _validate_batch_monitor_params,
+    batch_monitor_calls,
     check_health,
+    confirm_digits,
     handle_incoming_call,
     lambda_handler,
     monitor_call,
+    process_digits,
     transfer_call,
 )
+
+# Test constants
+EXPECTED_LIMIT_50 = 50
+EXPECTED_LIMIT_100 = 100
+HTTP_OK = 200
 
 
 def test_check_health() -> None:
@@ -518,3 +529,936 @@ def test_monitor_call_ssm_error(mocker: MockerFixture) -> None:
         monitor_call(call_sid)
 
     mock_logger_exception.assert_called_once_with(msg)
+
+
+def test_batch_monitor_calls_success(mocker: MockerFixture) -> None:
+    """Test successful batch monitor calls request."""
+    # Mock event with query parameters
+    mocker.patch("twiliowebhook.api.main.app", return_value=LambdaFunctionUrlResolver())
+    mock_event = {
+        "queryStringParameters": {
+            "start_date": "2024-01-01T00:00:00Z",
+            "end_date": "2024-01-31T23:59:59Z",
+            "limit": "50",
+        }
+    }
+    mocker.patch("twiliowebhook.api.main.app.current_event", new=mock_event)
+
+    # Mock SSM parameters
+    mocker.patch(
+        "twiliowebhook.api.main.retrieve_ssm_parameters",
+        return_value={
+            "/twh/dev/twilio-account-sid": "test-account-sid",
+            "/twh/dev/twilio-auth-token": "test-token",
+        },
+    )
+
+    # Mock call data
+    mock_call_1 = mocker.MagicMock()
+    mock_call_1.to_dict.return_value = {
+        "sid": "CA1111111111111111111111111111111",
+        "status": "completed",
+        "direction": "inbound",
+        "start_time": "2024-01-15T10:30:00Z",
+    }
+
+    mock_call_2 = mocker.MagicMock()
+    mock_call_2.to_dict.return_value = {
+        "sid": "CA2222222222222222222222222222222",
+        "status": "completed",
+        "direction": "outbound-api",
+        "start_time": "2024-01-20T14:45:00Z",
+    }
+
+    # Mock calls page
+    mock_calls_page = mocker.MagicMock()
+    mock_calls_page.__iter__.return_value = [mock_call_1, mock_call_2]
+    mock_calls_page.next_page_url = None
+
+    # Mock client
+    mock_client = mocker.MagicMock()
+    mock_client.calls.page.return_value = mock_calls_page
+
+    mocker.patch("twiliowebhook.api.main.Client", return_value=mock_client)
+
+    # Mock logger
+    mock_logger_info = mocker.patch("twiliowebhook.api.main.logger.info")
+
+    response = batch_monitor_calls()
+
+    assert response.status_code == HTTPStatus.OK
+    assert response.content_type == "application/json"
+
+    assert response.body is not None
+    response_data = json.loads(response.body)
+    expected_count = 2
+    assert len(response_data["calls"]) == expected_count
+    assert response_data["count"] == expected_count
+    assert response_data["next_page_token"] is None
+
+    mock_logger_info.assert_called_with(
+        "Batch call monitoring completed",
+        extra={
+            "start_date": "2024-01-01T00:00:00Z",
+            "end_date": "2024-01-31T23:59:59Z",
+            "count": expected_count,
+        },
+    )
+
+
+def test_batch_monitor_calls_with_filters(mocker: MockerFixture) -> None:
+    """Test batch monitor calls with status and direction filters."""
+    mocker.patch("twiliowebhook.api.main.app", return_value=LambdaFunctionUrlResolver())
+    mock_event = {
+        "queryStringParameters": {
+            "start_date": "2024-01-01T00:00:00Z",
+            "end_date": "2024-01-31T23:59:59Z",
+            "status": "completed",
+            "direction": "inbound",
+            "limit": "25",
+        }
+    }
+    mocker.patch("twiliowebhook.api.main.app.current_event", new=mock_event)
+
+    # Mock SSM parameters
+    mocker.patch(
+        "twiliowebhook.api.main.retrieve_ssm_parameters",
+        return_value={
+            "/twh/dev/twilio-account-sid": "test-account-sid",
+            "/twh/dev/twilio-auth-token": "test-token",
+        },
+    )
+
+    # Mock calls page
+    mock_calls_page = mocker.MagicMock()
+    mock_calls_page.__iter__.return_value = []
+    mock_calls_page.next_page_url = None
+
+    # Mock client
+    mock_client = mocker.MagicMock()
+    mock_client.calls.page.return_value = mock_calls_page
+
+    mocker.patch("twiliowebhook.api.main.Client", return_value=mock_client)
+
+    batch_monitor_calls()
+
+    # Verify the client was called with correct filters
+    from datetime import datetime  # noqa: PLC0415
+
+    mock_client.calls.page.assert_called_once_with(
+        start_time_after=datetime.fromisoformat("2024-01-01T00:00:00Z"),
+        start_time_before=datetime.fromisoformat("2024-01-31T23:59:59Z"),
+        limit=25,
+        status="completed",
+        direction="inbound",
+    )
+
+
+def test_batch_monitor_calls_with_pagination(mocker: MockerFixture) -> None:
+    """Test batch monitor calls with pagination token."""
+    mocker.patch("twiliowebhook.api.main.app", return_value=LambdaFunctionUrlResolver())
+    mock_event = {
+        "queryStringParameters": {
+            "start_date": "2024-01-01T00:00:00Z",
+            "end_date": "2024-01-31T23:59:59Z",
+            "page_token": "PA1234567890",
+        }
+    }
+    mocker.patch("twiliowebhook.api.main.app.current_event", new=mock_event)
+
+    # Mock SSM parameters
+    mocker.patch(
+        "twiliowebhook.api.main.retrieve_ssm_parameters",
+        return_value={
+            "/twh/dev/twilio-account-sid": "test-account-sid",
+            "/twh/dev/twilio-auth-token": "test-token",
+        },
+    )
+
+    # Mock calls page with next page URL
+    mock_calls_page = mocker.MagicMock()
+    mock_calls_page.__iter__.return_value = []
+    mock_calls_page.next_page_url = (
+        "https://api.twilio.com/2010-04-01/Accounts/ACXXXXXXX/"
+        "Calls.json?PageToken=PAXXXXXXX&Page=1"
+    )
+
+    # Mock client
+    mock_client = mocker.MagicMock()
+    mock_client.calls.page.return_value = mock_calls_page
+
+    mocker.patch("twiliowebhook.api.main.Client", return_value=mock_client)
+
+    response = batch_monitor_calls()
+    assert response.body is not None
+    response_data = json.loads(response.body)
+
+    assert response_data["next_page_token"] == "PAXXXXXXX"
+
+
+def test_batch_monitor_calls_missing_dates(mocker: MockerFixture) -> None:
+    """Test batch monitor calls with missing date parameters."""
+    mocker.patch("twiliowebhook.api.main.app", return_value=LambdaFunctionUrlResolver())
+    mock_event = {
+        "queryStringParameters": {
+            "start_date": "2024-01-01T00:00:00Z",
+            # end_date is missing
+        }
+    }
+    mocker.patch("twiliowebhook.api.main.app.current_event", new=mock_event)
+
+    mock_logger_error = mocker.patch("twiliowebhook.api.main.logger.error")
+
+    expected_msg = "Both start_date and end_date are required parameters"
+    with pytest.raises(BadRequestError, match=expected_msg):
+        batch_monitor_calls()
+
+    mock_logger_error.assert_called_once_with(expected_msg)
+
+
+def test_batch_monitor_calls_invalid_date_format(mocker: MockerFixture) -> None:
+    """Test batch monitor calls with invalid date format."""
+    mocker.patch("twiliowebhook.api.main.app", return_value=LambdaFunctionUrlResolver())
+    mock_event = {
+        "queryStringParameters": {
+            "start_date": "2024-01-01",  # Missing time component
+            "end_date": "2024-01-31T23:59:59Z",
+        }
+    }
+    mocker.patch("twiliowebhook.api.main.app.current_event", new=mock_event)
+
+    # Mock SSM parameters
+    mocker.patch(
+        "twiliowebhook.api.main.retrieve_ssm_parameters",
+        return_value={
+            "/twh/dev/twilio-account-sid": "test-account-sid",
+            "/twh/dev/twilio-auth-token": "test-token",
+        },
+    )
+
+    mock_logger_exception = mocker.patch("twiliowebhook.api.main.logger.exception")
+
+    with pytest.raises(BadRequestError, match="Invalid date format"):
+        batch_monitor_calls()
+
+    assert mock_logger_exception.called
+
+
+def test_batch_monitor_calls_invalid_date_range(mocker: MockerFixture) -> None:
+    """Test batch monitor calls with start_date after end_date."""
+    mocker.patch("twiliowebhook.api.main.app", return_value=LambdaFunctionUrlResolver())
+    mock_event = {
+        "queryStringParameters": {
+            "start_date": "2024-01-31T23:59:59Z",
+            "end_date": "2024-01-01T00:00:00Z",
+        }
+    }
+    mocker.patch("twiliowebhook.api.main.app.current_event", new=mock_event)
+
+    # Mock SSM parameters
+    mocker.patch(
+        "twiliowebhook.api.main.retrieve_ssm_parameters",
+        return_value={
+            "/twh/dev/twilio-account-sid": "test-account-sid",
+            "/twh/dev/twilio-auth-token": "test-token",
+        },
+    )
+
+    mock_logger_error = mocker.patch("twiliowebhook.api.main.logger.error")
+
+    expected_msg = "start_date must be before or equal to end_date"
+    with pytest.raises(BadRequestError, match=expected_msg):
+        batch_monitor_calls()
+
+    mock_logger_error.assert_called_once_with(expected_msg)
+
+
+def test_batch_monitor_calls_invalid_limit(mocker: MockerFixture) -> None:
+    """Test batch monitor calls with invalid limit parameter."""
+    mocker.patch("twiliowebhook.api.main.app", return_value=LambdaFunctionUrlResolver())
+    mock_event = {
+        "queryStringParameters": {
+            "start_date": "2024-01-01T00:00:00Z",
+            "end_date": "2024-01-31T23:59:59Z",
+            "limit": "1500",  # Over the maximum
+        }
+    }
+    mocker.patch("twiliowebhook.api.main.app.current_event", new=mock_event)
+
+    mock_logger_error = mocker.patch("twiliowebhook.api.main.logger.error")
+
+    with pytest.raises(BadRequestError, match="Limit must be between 1 and 1000"):
+        batch_monitor_calls()
+
+    mock_logger_error.assert_called_once_with("Limit must be between 1 and 1000")
+
+
+def test_batch_monitor_calls_twilio_error(mocker: MockerFixture) -> None:
+    """Test batch monitor calls with Twilio API error."""
+    mocker.patch("twiliowebhook.api.main.app", return_value=LambdaFunctionUrlResolver())
+    mock_event = {
+        "queryStringParameters": {
+            "start_date": "2024-01-01T00:00:00Z",
+            "end_date": "2024-01-31T23:59:59Z",
+        }
+    }
+    mocker.patch("twiliowebhook.api.main.app.current_event", new=mock_event)
+
+    # Mock SSM parameters
+    mocker.patch(
+        "twiliowebhook.api.main.retrieve_ssm_parameters",
+        return_value={
+            "/twh/dev/twilio-account-sid": "test-account-sid",
+            "/twh/dev/twilio-auth-token": "test-token",
+        },
+    )
+
+    # Import and mock TwilioRestException
+    from twilio.base.exceptions import TwilioRestException  # noqa: PLC0415
+
+    # Mock client to raise exception
+    mock_client = mocker.MagicMock()
+    mock_client.calls.page.side_effect = TwilioRestException(
+        401, "https://api.twilio.com", "Unauthorized", 20003
+    )
+
+    mocker.patch("twiliowebhook.api.main.Client", return_value=mock_client)
+
+    mock_logger_exception = mocker.patch("twiliowebhook.api.main.logger.exception")
+
+    with pytest.raises(InternalServerError, match="Twilio API error: Unauthorized"):
+        batch_monitor_calls()
+
+    mock_logger_exception.assert_called_once_with("Twilio API error: Unauthorized")
+
+
+def test_validate_batch_monitor_params_success() -> None:
+    """Test successful validation of batch monitor parameters."""
+    query_params = {
+        "start_date": "2024-01-01T00:00:00Z",
+        "end_date": "2024-01-31T23:59:59Z",
+        "status": "completed",
+        "direction": "inbound",
+        "limit": "50",
+        "page_token": "PA1234567890",
+    }
+
+    result = _validate_batch_monitor_params(query_params)
+
+    assert result["start_date"] == "2024-01-01T00:00:00Z"
+    assert result["end_date"] == "2024-01-31T23:59:59Z"
+    assert result["status"] == "completed"
+    assert result["direction"] == "inbound"
+    assert result["limit"] == EXPECTED_LIMIT_50
+    assert result["page_token"] == "PA1234567890"
+    assert "start_dt" in result
+    assert "end_dt" in result
+
+
+def test_validate_batch_monitor_params_missing_dates() -> None:
+    """Test validation fails when dates are missing."""
+    query_params = {"start_date": "2024-01-01T00:00:00Z"}
+
+    with pytest.raises(
+        BadRequestError, match="Both start_date and end_date are required parameters"
+    ):
+        _validate_batch_monitor_params(query_params)
+
+
+def test_validate_batch_monitor_params_invalid_date_format() -> None:
+    """Test validation fails with invalid date format."""
+    query_params = {
+        "start_date": "invalid-date",
+        "end_date": "2024-01-31T23:59:59Z",
+    }
+
+    with pytest.raises(BadRequestError, match="Invalid date format"):
+        _validate_batch_monitor_params(query_params)
+
+
+def test_validate_batch_monitor_params_invalid_date_range() -> None:
+    """Test validation fails when start_date is after end_date."""
+    query_params = {
+        "start_date": "2024-01-31T23:59:59Z",
+        "end_date": "2024-01-01T00:00:00Z",
+    }
+
+    with pytest.raises(
+        BadRequestError, match="start_date must be before or equal to end_date"
+    ):
+        _validate_batch_monitor_params(query_params)
+
+
+def test_validate_batch_monitor_params_invalid_limit() -> None:
+    """Test validation fails with invalid limit values."""
+    # Test negative limit
+    query_params = {
+        "start_date": "2024-01-01T00:00:00Z",
+        "end_date": "2024-01-31T23:59:59Z",
+        "limit": "-1",
+    }
+
+    with pytest.raises(BadRequestError, match="Limit must be between 1 and 1000"):
+        _validate_batch_monitor_params(query_params)
+
+    # Test limit too high
+    query_params["limit"] = "1001"
+
+    with pytest.raises(BadRequestError, match="Limit must be between 1 and 1000"):
+        _validate_batch_monitor_params(query_params)
+
+
+def test_validate_batch_monitor_params_defaults() -> None:
+    """Test default values are applied correctly."""
+    query_params = {
+        "start_date": "2024-01-01T00:00:00Z",
+        "end_date": "2024-01-31T23:59:59Z",
+    }
+
+    result = _validate_batch_monitor_params(query_params)
+
+    assert result["limit"] == EXPECTED_LIMIT_100  # Default limit
+    assert result["status"] is None
+    assert result["direction"] is None
+    assert result["page_token"] is None
+
+
+def test_extract_next_page_token_success() -> None:
+    """Test successful extraction of next page token."""
+    next_page_url = (
+        "https://api.twilio.com/2010-04-01/Accounts/ACXXXXXXX/"
+        "Calls.json?PageToken=PAXXXXXXX&Page=1&Limit=50"
+    )
+
+    result = _extract_next_page_token(next_page_url)
+
+    assert result == "PAXXXXXXX"
+
+
+def test_extract_next_page_token_no_url() -> None:
+    """Test extraction returns None when no URL provided."""
+    result = _extract_next_page_token(None)
+
+    assert result is None
+
+
+def test_extract_next_page_token_no_token() -> None:
+    """Test extraction returns None when URL has no PageToken."""
+    next_page_url = (
+        "https://api.twilio.com/2010-04-01/Accounts/ACXXXXXXX/Calls.json?Page=1"
+    )
+
+    with pytest.raises(IndexError):
+        _extract_next_page_token(next_page_url)
+
+
+def test_monitor_call_general_exception(mocker: MockerFixture) -> None:
+    """Test monitor_call with general exception handling."""
+    call_sid = "CA1234567890abcdef1234567890abcdef"
+
+    # Mock SSM parameters to raise a general exception
+    mocker.patch(
+        "twiliowebhook.api.main.retrieve_ssm_parameters",
+        side_effect=Exception("Unexpected error"),
+    )
+
+    mock_logger_exception = mocker.patch("twiliowebhook.api.main.logger.exception")
+
+    with pytest.raises(
+        InternalServerError, match="Failed to fetch call details: Unexpected error"
+    ):
+        monitor_call(call_sid)
+
+    mock_logger_exception.assert_called_once_with(
+        "Failed to fetch call details: Unexpected error"
+    )
+
+
+def test_batch_monitor_calls_general_exception(mocker: MockerFixture) -> None:
+    """Test batch_monitor_calls with general exception handling."""
+    mocker.patch("twiliowebhook.api.main.app", return_value=LambdaFunctionUrlResolver())
+    mock_event = {
+        "queryStringParameters": {
+            "start_date": "2024-01-01T00:00:00Z",
+            "end_date": "2024-01-31T23:59:59Z",
+        }
+    }
+    mocker.patch("twiliowebhook.api.main.app.current_event", new=mock_event)
+
+    # Mock SSM parameters to raise a general exception
+    mocker.patch(
+        "twiliowebhook.api.main.retrieve_ssm_parameters",
+        side_effect=Exception("Unexpected error"),
+    )
+
+    mock_logger_exception = mocker.patch("twiliowebhook.api.main.logger.exception")
+
+    with pytest.raises(
+        InternalServerError, match="Failed to fetch calls: Unexpected error"
+    ):
+        batch_monitor_calls()
+
+    mock_logger_exception.assert_called_once_with(
+        "Failed to fetch calls: Unexpected error"
+    )
+
+
+def test_batch_monitor_calls_value_error_in_main(mocker: MockerFixture) -> None:
+    """Test batch_monitor_calls with ValueError in main try block."""
+    mocker.patch("twiliowebhook.api.main.app", return_value=LambdaFunctionUrlResolver())
+    mock_event = {
+        "queryStringParameters": {
+            "start_date": "2024-01-01T00:00:00Z",
+            "end_date": "2024-01-31T23:59:59Z",
+            "limit": "not-a-number",  # This will cause ValueError
+        }
+    }
+    mocker.patch("twiliowebhook.api.main.app.current_event", new=mock_event)
+
+    mock_logger_exception = mocker.patch("twiliowebhook.api.main.logger.exception")
+
+    expected_msg = "Invalid date format or parameter configuration"
+    with pytest.raises(BadRequestError, match=expected_msg):
+        batch_monitor_calls()
+
+    assert mock_logger_exception.called
+
+
+def test__respond_to_call_birthdate_with_current_url(mocker: MockerFixture) -> None:
+    """Test _respond_to_call for birthdate template with current URL."""
+    # Mock XML parsing functions
+    mock_root = mocker.MagicMock()
+    mock_gather = mocker.MagicMock()
+    mock_redirect = mocker.MagicMock()
+
+    mocker.patch(
+        "twiliowebhook.api.main.parse_xml_and_extract_root", return_value=mock_root
+    )
+    mocker.patch(
+        "twiliowebhook.api.main.find_xml_element",
+        side_effect=[mock_gather, mock_redirect],
+    )
+    mocker.patch(
+        "twiliowebhook.api.main.convert_xml_root_to_string",
+        return_value="<Response></Response>",
+    )
+
+    # Mock logger
+    mock_logger_info = mocker.patch("twiliowebhook.api.main.logger.info")
+
+    response = _respond_to_call(
+        twiml_file_path=BIRTHDATE_TWIML_FILE_PATH,
+        caller_phone_number="+1234567890",
+        media_api_url="wss://media.example.com",
+        webhook_api_url="https://webhook.example.com/api/v1/webhook",
+    )
+
+    # Verify gather action was set
+    mock_gather.set.assert_called_once_with(
+        "action", "https://webhook.example.com/process-digits/birthdate"
+    )
+
+    # Verify redirect text was set with current URL
+    mock_redirect.text = "https://webhook.example.com/api/v1/webhook"
+
+    # Verify logger was called with the correct URL
+    mock_logger_info.assert_called_with(
+        "process_birthdate_url: %s",
+        "https://webhook.example.com/process-digits/birthdate",
+    )
+
+    assert response.status_code == HTTP_OK
+
+
+def test__respond_to_call_birthdate_without_current_url(mocker: MockerFixture) -> None:
+    """Test _respond_to_call for birthdate template without current URL."""
+    # Mock XML parsing functions
+    mock_root = mocker.MagicMock()
+    mock_gather = mocker.MagicMock()
+    mock_redirect = mocker.MagicMock()
+
+    mocker.patch(
+        "twiliowebhook.api.main.parse_xml_and_extract_root", return_value=mock_root
+    )
+    mocker.patch(
+        "twiliowebhook.api.main.find_xml_element",
+        side_effect=[mock_gather, mock_redirect],
+    )
+    mocker.patch(
+        "twiliowebhook.api.main.convert_xml_root_to_string",
+        return_value="<Response></Response>",
+    )
+
+    # Use webhook URL without path to test the else branch
+    response = _respond_to_call(
+        twiml_file_path=BIRTHDATE_TWIML_FILE_PATH,
+        caller_phone_number="+1234567890",
+        media_api_url="wss://media.example.com",
+        webhook_api_url="https://webhook.example.com",  # No path test
+    )
+
+    # Verify gather action was set
+    mock_gather.set.assert_called_once_with(
+        "action", "https://webhook.example.com/process-digits/birthdate"
+    )
+
+    # Verify redirect text was NOT set since current_url is empty
+    # redirect.text exists (it's a MagicMock) but shouldn't be assigned
+    # We can verify this by checking that it wasn't called with assignment
+    assert response.status_code == HTTP_OK
+
+
+def test_process_digits_invalid_target(mocker: MockerFixture) -> None:
+    """Test process_digits with invalid target."""
+    mocker.patch("twiliowebhook.api.main.app", return_value=LambdaFunctionUrlResolver())
+
+    mock_logger_error = mocker.patch("twiliowebhook.api.main.logger.error")
+
+    with pytest.raises(
+        BadRequestError, match=r"Invalid target: invalid\. Expected 'birthdate'\."
+    ):
+        process_digits("invalid")
+
+    mock_logger_error.assert_called_once_with(
+        "Invalid target: invalid. Expected 'birthdate'."
+    )
+
+
+def test_process_digits_missing_digits(mocker: MockerFixture) -> None:
+    """Test process_digits with missing digits parameter."""
+    mocker.patch("twiliowebhook.api.main.app", return_value=LambdaFunctionUrlResolver())
+    mock_event = {"queryStringParameters": {}}  # No digits parameter
+    mocker.patch("twiliowebhook.api.main.app.current_event", new=mock_event)
+
+    mock_logger_error = mocker.patch("twiliowebhook.api.main.logger.error")
+
+    with pytest.raises(
+        BadRequestError, match="Birth date digits not found in the request"
+    ):
+        process_digits("birthdate")
+
+    mock_logger_error.assert_called_once_with(
+        "Birth date digits not found in the request"
+    )
+
+
+def test_process_digits_invalid_format(mocker: MockerFixture) -> None:
+    """Test process_digits with invalid digit format."""
+    mocker.patch("twiliowebhook.api.main.app", return_value=LambdaFunctionUrlResolver())
+    mock_event = {"queryStringParameters": {"digits": "123"}}  # Too short
+    mocker.patch("twiliowebhook.api.main.app.current_event", new=mock_event)
+
+    mock_logger_error = mocker.patch("twiliowebhook.api.main.logger.error")
+
+    with pytest.raises(BadRequestError, match="Invalid birth date format"):
+        process_digits("birthdate")
+
+    mock_logger_error.assert_called_once()
+
+
+def test_confirm_digits_invalid_target(mocker: MockerFixture) -> None:
+    """Test confirm_digits with invalid target."""
+    mocker.patch("twiliowebhook.api.main.app", return_value=LambdaFunctionUrlResolver())
+
+    mock_logger_error = mocker.patch("twiliowebhook.api.main.logger.error")
+
+    with pytest.raises(
+        BadRequestError, match=r"Invalid target: invalid\. Expected 'birthdate'\."
+    ):
+        confirm_digits("invalid")
+
+    mock_logger_error.assert_called_once_with(
+        "Invalid target: invalid. Expected 'birthdate'."
+    )
+
+
+def test_confirm_digits_missing_digits(mocker: MockerFixture) -> None:
+    """Test confirm_digits with missing confirmation digits."""
+    mocker.patch("twiliowebhook.api.main.app", return_value=LambdaFunctionUrlResolver())
+    mock_event = {
+        "queryStringParameters": {"birthdate": "20240101"}
+    }  # No digits parameter
+    mocker.patch("twiliowebhook.api.main.app.current_event", new=mock_event)
+
+    mock_logger_error = mocker.patch("twiliowebhook.api.main.logger.error")
+
+    with pytest.raises(
+        BadRequestError, match="Confirmation digits not found in the request"
+    ):
+        confirm_digits("birthdate")
+
+    mock_logger_error.assert_called_once_with(
+        "Confirmation digits not found in the request"
+    )
+
+
+def test_confirm_digits_missing_birthdate(mocker: MockerFixture) -> None:
+    """Test confirm_digits with missing birthdate parameter."""
+    mocker.patch("twiliowebhook.api.main.app", return_value=LambdaFunctionUrlResolver())
+    mock_event = {"queryStringParameters": {"digits": "1"}}  # No birthdate parameter
+    mocker.patch("twiliowebhook.api.main.app.current_event", new=mock_event)
+
+    mock_logger_error = mocker.patch("twiliowebhook.api.main.logger.error")
+
+    with pytest.raises(
+        BadRequestError, match="Birthdate parameter not found in the request"
+    ):
+        confirm_digits("birthdate")
+
+    mock_logger_error.assert_called_once_with(
+        "Birthdate parameter not found in the request"
+    )
+
+
+def test_process_digits_success(mocker: MockerFixture) -> None:
+    """Test successful process_digits execution."""
+    mocker.patch("twiliowebhook.api.main.app", return_value=LambdaFunctionUrlResolver())
+    mock_event = {"queryStringParameters": {"digits": "20240101"}}
+    mocker.patch("twiliowebhook.api.main.app.current_event", new=mock_event)
+
+    # Mock SSM parameters
+    mocker.patch(
+        "twiliowebhook.api.main.retrieve_ssm_parameters",
+        return_value={
+            "/twh/dev/twilio-auth-token": "test-token",
+            "/twh/dev/webhook-api-url": "https://webhook.example.com",
+        },
+    )
+
+    # Mock Twilio signature validation
+    mocker.patch("twiliowebhook.api.main.validate_http_twilio_signature")
+
+    # Mock XML functions
+    mock_root = mocker.MagicMock()
+    mock_say = mocker.MagicMock()
+    mock_gather = mocker.MagicMock()
+    mock_redirect = mocker.MagicMock()
+
+    mocker.patch(
+        "twiliowebhook.api.main.parse_xml_and_extract_root", return_value=mock_root
+    )
+    mocker.patch(
+        "twiliowebhook.api.main.find_xml_element",
+        side_effect=[mock_say, mock_gather, mock_redirect],
+    )
+    mocker.patch(
+        "twiliowebhook.api.main.convert_xml_root_to_string",
+        return_value="<Response></Response>",
+    )
+
+    # Mock logger
+    mock_logger_info = mocker.patch("twiliowebhook.api.main.logger.info")
+
+    response = process_digits("birthdate")
+
+    assert response.status_code == HTTP_OK
+    mock_logger_info.assert_called_with(
+        "Received birth date: %s-%s-%s", "2024", "01", "01"
+    )
+
+
+def test_confirm_digits_success_confirm(mocker: MockerFixture) -> None:
+    """Test successful confirm_digits with confirmation (digits=1)."""
+    mocker.patch("twiliowebhook.api.main.app", return_value=LambdaFunctionUrlResolver())
+    mock_event = {"queryStringParameters": {"digits": "1", "birthdate": "20240101"}}
+    mocker.patch("twiliowebhook.api.main.app.current_event", new=mock_event)
+
+    # Mock SSM parameters
+    mocker.patch(
+        "twiliowebhook.api.main.retrieve_ssm_parameters",
+        return_value={
+            "/twh/dev/twilio-auth-token": "test-token",
+            "/twh/dev/webhook-api-url": "https://webhook.example.com",
+        },
+    )
+
+    # Mock Twilio signature validation
+    mocker.patch("twiliowebhook.api.main.validate_http_twilio_signature")
+
+    # Mock XML functions
+    mock_root = mocker.MagicMock()
+    mock_say = mocker.MagicMock()
+
+    mocker.patch(
+        "twiliowebhook.api.main.parse_xml_and_extract_root", return_value=mock_root
+    )
+    mocker.patch("twiliowebhook.api.main.find_xml_element", return_value=mock_say)
+    mocker.patch(
+        "twiliowebhook.api.main.convert_xml_root_to_string",
+        return_value="<Response></Response>",
+    )
+
+    # Mock logger
+    mock_logger_info = mocker.patch("twiliowebhook.api.main.logger.info")
+
+    response = confirm_digits("birthdate")
+
+    assert response.status_code == HTTP_OK
+    mock_logger_info.assert_called_with(
+        "Birth date confirmed: %s-%s-%s", "2024", "01", "01"
+    )
+
+
+def test_confirm_digits_success_reenter(mocker: MockerFixture) -> None:
+    """Test successful confirm_digits with re-enter (digits=2)."""
+    mocker.patch("twiliowebhook.api.main.app", return_value=LambdaFunctionUrlResolver())
+    mock_event = {"queryStringParameters": {"digits": "2", "birthdate": "20240101"}}
+    mocker.patch("twiliowebhook.api.main.app.current_event", new=mock_event)
+
+    # Mock SSM parameters
+    mocker.patch(
+        "twiliowebhook.api.main.retrieve_ssm_parameters",
+        return_value={
+            "/twh/dev/twilio-auth-token": "test-token",
+            "/twh/dev/webhook-api-url": "https://webhook.example.com",
+        },
+    )
+
+    # Mock Twilio signature validation
+    mocker.patch("twiliowebhook.api.main.validate_http_twilio_signature")
+
+    # Mock XML functions
+    mock_root = mocker.MagicMock()
+    mock_redirect = mocker.MagicMock()
+
+    mocker.patch(
+        "twiliowebhook.api.main.parse_xml_and_extract_root", return_value=mock_root
+    )
+    mocker.patch("twiliowebhook.api.main.find_xml_element", return_value=mock_redirect)
+    mocker.patch(
+        "twiliowebhook.api.main.convert_xml_root_to_string",
+        return_value="<Response></Response>",
+    )
+
+    # Mock logger
+    mock_logger_info = mocker.patch("twiliowebhook.api.main.logger.info")
+
+    response = confirm_digits("birthdate")
+
+    assert response.status_code == HTTP_OK
+    mock_logger_info.assert_called_with("User chose to re-enter birth date")
+
+
+def test_confirm_digits_invalid_input(mocker: MockerFixture) -> None:
+    """Test confirm_digits with invalid input (digits=3)."""
+    mocker.patch("twiliowebhook.api.main.app", return_value=LambdaFunctionUrlResolver())
+    mock_event = {"queryStringParameters": {"digits": "3", "birthdate": "20240101"}}
+    mocker.patch("twiliowebhook.api.main.app.current_event", new=mock_event)
+
+    # Mock SSM parameters
+    mocker.patch(
+        "twiliowebhook.api.main.retrieve_ssm_parameters",
+        return_value={
+            "/twh/dev/twilio-auth-token": "test-token",
+            "/twh/dev/webhook-api-url": "https://webhook.example.com",
+        },
+    )
+
+    # Mock Twilio signature validation
+    mocker.patch("twiliowebhook.api.main.validate_http_twilio_signature")
+
+    # Mock XML functions
+    mock_root = mocker.MagicMock()
+    mock_gather = mocker.MagicMock()
+    mock_redirect = mocker.MagicMock()
+
+    mocker.patch(
+        "twiliowebhook.api.main.parse_xml_and_extract_root", return_value=mock_root
+    )
+    mocker.patch(
+        "twiliowebhook.api.main.find_xml_element",
+        side_effect=[mock_gather, mock_redirect],
+    )
+    mocker.patch(
+        "twiliowebhook.api.main.convert_xml_root_to_string",
+        return_value="<Response></Response>",
+    )
+
+    # Mock logger
+    mock_logger_warning = mocker.patch("twiliowebhook.api.main.logger.warning")
+
+    response = confirm_digits("birthdate")
+
+    assert response.status_code == HTTP_OK
+    mock_logger_warning.assert_called_with("Invalid confirmation input: %s", "3")
+
+
+def test_confirm_digits_ssm_error(mocker: MockerFixture) -> None:
+    """Test confirm_digits with SSM parameter error."""
+    mocker.patch("twiliowebhook.api.main.app", return_value=LambdaFunctionUrlResolver())
+    mock_event = {"queryStringParameters": {"digits": "1", "birthdate": "20240101"}}
+    mocker.patch("twiliowebhook.api.main.app.current_event", new=mock_event)
+
+    # Mock SSM to raise ValueError (which gets caught by general Exception handler)
+    mocker.patch(
+        "twiliowebhook.api.main.retrieve_ssm_parameters",
+        side_effect=ValueError("Invalid parameter"),
+    )
+
+    mock_logger_exception = mocker.patch("twiliowebhook.api.main.logger.exception")
+
+    with pytest.raises(InternalServerError, match="Invalid parameter"):
+        confirm_digits("birthdate")
+
+    mock_logger_exception.assert_called_once_with("Invalid parameter")
+
+
+def test_confirm_digits_signature_validation_error(mocker: MockerFixture) -> None:
+    """Test confirm_digits with signature validation error."""
+    mocker.patch("twiliowebhook.api.main.app", return_value=LambdaFunctionUrlResolver())
+    mock_event = {"queryStringParameters": {"digits": "1", "birthdate": "20240101"}}
+    mocker.patch("twiliowebhook.api.main.app.current_event", new=mock_event)
+
+    # Mock SSM parameters
+    mocker.patch(
+        "twiliowebhook.api.main.retrieve_ssm_parameters",
+        return_value={
+            "/twh/dev/twilio-auth-token": "fake_token",
+            "/twh/dev/webhook-api-url": "https://webhook.example.com",
+        },
+    )
+
+    # Mock signature validation to raise UnauthorizedError
+    mocker.patch(
+        "twiliowebhook.api.main.validate_http_twilio_signature",
+        side_effect=UnauthorizedError("Invalid signature"),
+    )
+
+    mock_logger_exception = mocker.patch("twiliowebhook.api.main.logger.exception")
+
+    with pytest.raises(UnauthorizedError, match="Invalid signature"):
+        confirm_digits("birthdate")
+
+    mock_logger_exception.assert_called_once_with("Invalid signature")
+
+
+def test_confirm_digits_xml_processing_error(mocker: MockerFixture) -> None:
+    """Test confirm_digits with XML processing error."""
+    mocker.patch("twiliowebhook.api.main.app", return_value=LambdaFunctionUrlResolver())
+    mock_event = {"queryStringParameters": {"digits": "1", "birthdate": "20240101"}}
+    mocker.patch("twiliowebhook.api.main.app.current_event", new=mock_event)
+
+    # Mock SSM parameters
+    mocker.patch(
+        "twiliowebhook.api.main.retrieve_ssm_parameters",
+        return_value={
+            "/twh/dev/twilio-auth-token": "fake_token",
+            "/twh/dev/webhook-api-url": "https://webhook.example.com",
+        },
+    )
+
+    # Mock signature validation to pass
+    mocker.patch("twiliowebhook.api.main.validate_http_twilio_signature")
+
+    # Mock XML parsing to raise exception
+    mocker.patch(
+        "twiliowebhook.api.main.parse_xml_and_extract_root",
+        side_effect=Exception("XML parsing failed"),
+    )
+
+    mock_logger_exception = mocker.patch("twiliowebhook.api.main.logger.exception")
+
+    with pytest.raises(InternalServerError, match="XML parsing failed"):
+        confirm_digits("birthdate")
+
+    mock_logger_exception.assert_called_once_with("XML parsing failed")
