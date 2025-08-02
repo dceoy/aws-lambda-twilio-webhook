@@ -20,6 +20,9 @@ from aws_lambda_powertools.event_handler.exceptions import (
 from aws_lambda_powertools.logging import correlation_paths
 from aws_lambda_powertools.utilities.data_classes import LambdaFunctionUrlEvent
 from aws_lambda_powertools.utilities.typing import LambdaContext
+from twilio.base.exceptions import TwilioRestException
+from twilio.http.http_client import TwilioHttpClient
+from twilio.rest import Client
 
 from .awsssm import retrieve_ssm_parameters
 from .constants import (
@@ -30,6 +33,7 @@ from .constants import (
     BIRTHDATE_RETRY_TWIML_FILE_PATH,
     BIRTHDATE_TWIML_FILE_PATH,
     CONNECT_TWIML_FILE_PATH,
+    CONTENT_TYPE_JSON,
     CONTENT_TYPE_XML,
     DIAL_TWIML_FILE_PATH,
     DTMF_OPERATOR_TRANSFER,
@@ -45,6 +49,7 @@ from .constants import (
     PROCESS_BIRTHDATE_PATH,
     SSM_MEDIA_API_URL,
     SSM_OPERATOR_PHONE_NUMBER,
+    SSM_TWILIO_ACCOUNT_SID,
     SSM_TWILIO_AUTH_TOKEN,
     SSM_WEBHOOK_API_URL,
     SYSTEM_NAME,
@@ -155,7 +160,58 @@ def transfer_call(country_code: str = "US") -> Response[str]:
         )
 
 
-@app.post("/incoming-call/<twiml_file_stem>")
+@app.get("/monitor-call/<call_sid>")
+@tracer.capture_method
+def monitor_call(call_sid: str) -> Response[str]:
+    """Monitor a call and return call details.
+
+    Args:
+        call_sid (str): The SID of the call to monitor.
+
+    Returns:
+        Response[str]: A JSON response with call details.
+
+    Raises:
+        BadRequestError: If the call is not found.
+        InternalServerError: If there's an error fetching call details.
+    """
+    parameter_names = {
+        k: f"/{SYSTEM_NAME}/{ENV_TYPE}/{k}"
+        for k in [SSM_TWILIO_ACCOUNT_SID, SSM_TWILIO_AUTH_TOKEN]
+    }
+    try:
+        parameters = retrieve_ssm_parameters(*parameter_names.values())
+        client = Client(
+            username=parameters[parameter_names[SSM_TWILIO_ACCOUNT_SID]],
+            password=parameters[parameter_names[SSM_TWILIO_AUTH_TOKEN]],
+            http_client=TwilioHttpClient(timeout=10),
+        )
+        call = client.calls(call_sid).fetch()
+        logger.info("Call details fetched successfully", extra={"call_sid": call_sid})
+        return Response(
+            status_code=HTTPStatus.OK,
+            content_type=CONTENT_TYPE_JSON,
+            body=json.dumps(call.to_dict()),
+        )
+    except TwilioRestException as e:
+        if e.code == 20404:  # noqa: PLR2004
+            error_message = f"Call not found: {call_sid}"
+            logger.exception(error_message)
+            raise BadRequestError(error_message) from e
+        error_message = f"Twilio API error: {e.msg}"
+        logger.exception(error_message)
+        raise InternalServerError(error_message) from e
+    except ValueError as e:
+        error_message = f"Invalid parameter configuration: {e!s}"
+        logger.exception(error_message)
+        raise InternalServerError(error_message) from e
+    except Exception as e:
+        error_message = f"Failed to fetch call details: {e!s}"
+        logger.exception(error_message)
+        raise InternalServerError(error_message) from e
+
+
+@app.post("/handle-incoming-call/<twiml_file_stem>")
 @tracer.capture_method
 def handle_incoming_call(twiml_file_stem: str) -> Response[str]:
     """Handle incoming call and return TwiML response.
@@ -277,8 +333,10 @@ def _build_webhook_urls(webhook_api_url: str) -> dict[str, str]:
     webhook_fqdn = urlparse(webhook_api_url).netloc
     return {
         "fqdn": webhook_fqdn,
-        "confirm": f"{HTTPS_SCHEME}{webhook_fqdn}/confirm-birthdate",
-        "birthdate_entry": f"{HTTPS_SCHEME}{webhook_fqdn}/incoming-call/birthdate",
+        "confirm": f"{HTTPS_SCHEME}{webhook_fqdn}/confirm-digits/birthdate",
+        "birthdate_entry": (
+            f"{HTTPS_SCHEME}{webhook_fqdn}/handle-incoming-call/birthdate"
+        ),
     }
 
 
@@ -350,10 +408,13 @@ def lambda_handler(event: dict[str, Any], context: LambdaContext) -> dict[str, A
     return app.resolve(event=event, context=context)
 
 
-@app.post("/process-birthdate")
+@app.post("/process-digits/<target>")
 @tracer.capture_method
-def process_birthdate() -> Response[str]:
-    """Process birth date input and return TwiML response.
+def process_digits(target: str) -> Response[str]:
+    """Process the digits entered by the user and return a TwiML response.
+
+    Args:
+        target (str): The target for the digits, expected to be "birthdate".
 
     Returns:
         Response[str]: TwiML response after processing birth date.
@@ -364,6 +425,10 @@ def process_birthdate() -> Response[str]:
         InternalServerError: If there's an error processing the request.
 
     """
+    if target != "birthdate":
+        error_message = f"Invalid target: {target}. Expected 'birthdate'."
+        logger.error(error_message)
+        raise BadRequestError(error_message)
     digits = app.current_event["queryStringParameters"].get("digits")
     if not digits:
         logger.error(ERROR_BIRTHDATE_DIGITS_NOT_FOUND)
@@ -437,10 +502,13 @@ def process_birthdate() -> Response[str]:
         )
 
 
-@app.post("/confirm-birthdate")
+@app.post("/confirm-digits/<target>")
 @tracer.capture_method
-def confirm_birthdate() -> Response[str]:
-    """Handle birthdate confirmation and return TwiML response.
+def confirm_digits(target: str) -> Response[str]:
+    """Confirm the digits entered by the user and return a TwiML response.
+
+    Args:
+        target (str): The target for the digits, expected to be "birthdate".
 
     Returns:
         Response[str]: TwiML response after processing confirmation.
@@ -451,6 +519,10 @@ def confirm_birthdate() -> Response[str]:
         InternalServerError: If there's an error processing the request.
 
     """
+    if target != "birthdate":
+        error_message = f"Invalid target: {target}. Expected 'birthdate'."
+        logger.error(error_message)
+        raise BadRequestError(error_message)
     query_params = app.current_event["queryStringParameters"]
     digits = query_params.get("digits")
     birthdate = query_params.get("birthdate")

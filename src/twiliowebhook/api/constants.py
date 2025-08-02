@@ -37,6 +37,7 @@ TWILIO_SIGNATURE_HEADER = "X-Twilio-Signature"
 
 # SSM Parameter Names
 SSM_TWILIO_AUTH_TOKEN = "twilio-auth-token"  # noqa: S105
+SSM_TWILIO_ACCOUNT_SID = "twilio-account-sid"
 SSM_MEDIA_API_URL = "media-api-url"
 SSM_OPERATOR_PHONE_NUMBER = "operator-phone-number"
 SSM_WEBHOOK_API_URL = "webhook-api-url"
@@ -48,9 +49,9 @@ DTMF_OPERATOR_TRANSFER = "2"
 # URL Paths
 HEALTH_ENDPOINT = "/health"
 TRANSFER_CALL_ENDPOINT = "/transfer-call"
-INCOMING_CALL_ENDPOINT = "/incoming-call/<twiml_file_stem>"
-PROCESS_BIRTHDATE_PATH = "/process-birthdate"
-CONFIRM_BIRTHDATE_PATH = "/confirm-birthdate"
+INCOMING_CALL_ENDPOINT = "/handle-incoming-call/<twiml_file_stem>"
+PROCESS_BIRTHDATE_PATH = "/process-digits/birthdate"
+CONFIRM_BIRTHDATE_PATH = "/confirm-digits/birthdate"
 
 # URL Components
 HTTPS_SCHEME = "https://"
