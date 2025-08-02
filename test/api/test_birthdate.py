@@ -2,6 +2,7 @@
 
 # pyright: reportPrivateUsage=false
 
+import re
 from http import HTTPStatus
 from typing import Any
 
@@ -21,9 +22,9 @@ from pytest_mock import MockerFixture
 
 from twiliowebhook.api.constants import HANGUP_TWIML_FILE_PATH
 from twiliowebhook.api.main import (
-    confirm_birthdate,
+    confirm_digits,
     handle_incoming_call,
-    process_birthdate,
+    process_digits,
 )
 
 
@@ -65,7 +66,7 @@ def test_handle_incoming_call_birthdate(mocker: MockerFixture) -> None:
     assert response.status_code == HTTPStatus.OK
     assert response.content_type == "application/xml"
     assert response.body is not None
-    assert "process-birthdate" in response.body
+    assert "process-digits/birthdate" in response.body
     assert "Enter the year, month, and day" in response.body
 
 
@@ -77,7 +78,7 @@ def test_handle_incoming_call_birthdate(mocker: MockerFixture) -> None:
         ("19850705", "1985", "07", "05"),
     ],
 )
-def test_process_birthdate_valid(
+def test_process_digits_valid(
     digits: str,
     expected_year: str,
     expected_month: str,
@@ -104,7 +105,7 @@ def test_process_birthdate_valid(
     )
     mock_logger_info = mocker.patch("twiliowebhook.api.main.logger.info")
 
-    response = process_birthdate()
+    response = process_digits("birthdate")
 
     mock_retrieve_ssm_parameters.assert_called_once_with(
         "/twh/dev/twilio-auth-token",
@@ -122,10 +123,10 @@ def test_process_birthdate_valid(
     assert response.body is not None
     assert f"{expected_month} {expected_day}, {expected_year}" in response.body
     assert "Press 1 to confirm, or press 2 to re-enter" in response.body
-    assert "confirm-birthdate" in response.body
+    assert "confirm-digits/birthdate" in response.body
 
 
-def test_process_birthdate_no_digits(mocker: MockerFixture) -> None:
+def test_process_digits_no_digits(mocker: MockerFixture) -> None:
     mocker.patch("twiliowebhook.api.main.app", return_value=LambdaFunctionUrlResolver())
     mocker.patch(
         "twiliowebhook.api.main.app.current_event",
@@ -135,7 +136,7 @@ def test_process_birthdate_no_digits(mocker: MockerFixture) -> None:
     with pytest.raises(
         BadRequestError, match="Birth date digits not found in the request"
     ):
-        process_birthdate()
+        process_digits("birthdate")
     mock_logger_error.assert_called_once_with(
         "Birth date digits not found in the request"
     )
@@ -150,7 +151,7 @@ def test_process_birthdate_no_digits(mocker: MockerFixture) -> None:
         ("1990/01/15", "Invalid birth date format.*Expected YYYYMMDD"),
     ],
 )
-def test_process_birthdate_invalid_format(
+def test_process_digits_invalid_format(
     digits: str, error_pattern: str, mocker: MockerFixture
 ) -> None:
     mocker.patch("twiliowebhook.api.main.app", return_value=LambdaFunctionUrlResolver())
@@ -160,11 +161,11 @@ def test_process_birthdate_invalid_format(
     )
     mock_logger_error = mocker.patch("twiliowebhook.api.main.logger.error")
     with pytest.raises(BadRequestError, match=error_pattern):
-        process_birthdate()
+        process_digits("birthdate")
     assert mock_logger_error.called
 
 
-def test_process_birthdate_ssm_error(mocker: MockerFixture) -> None:
+def test_process_digits_ssm_error(mocker: MockerFixture) -> None:
     mocker.patch("twiliowebhook.api.main.app", return_value=LambdaFunctionUrlResolver())
     mocker.patch(
         "twiliowebhook.api.main.app.current_event",
@@ -177,7 +178,7 @@ def test_process_birthdate_ssm_error(mocker: MockerFixture) -> None:
     )
     mock_logger_exception = mocker.patch("twiliowebhook.api.main.logger.exception")
     with pytest.raises(InternalServerError, match=error_message):
-        process_birthdate()
+        process_digits("birthdate")
     mock_logger_exception.assert_called_once_with(error_message)
 
 
@@ -188,7 +189,7 @@ def test_process_birthdate_ssm_error(mocker: MockerFixture) -> None:
         (UnauthorizedError, "Invalid signature"),
     ],
 )
-def test_process_birthdate_invalid_signature(
+def test_process_digits_invalid_signature(
     exception: Any, error_message: str, mocker: MockerFixture
 ) -> None:
     mocker.patch("twiliowebhook.api.main.app", return_value=LambdaFunctionUrlResolver())
@@ -212,11 +213,11 @@ def test_process_birthdate_invalid_signature(
     )
     mock_logger_exception = mocker.patch("twiliowebhook.api.main.logger.exception")
     with pytest.raises(exception, match=error_message):
-        process_birthdate()
+        process_digits("birthdate")
     mock_logger_exception.assert_called_once_with(error_message)
 
 
-def test_confirm_birthdate_confirm(mocker: MockerFixture) -> None:
+def test_confirm_digits_confirm(mocker: MockerFixture) -> None:
     mocker.patch("twiliowebhook.api.main.app", return_value=LambdaFunctionUrlResolver())
     mock_event = LambdaFunctionUrlEvent({
         "queryStringParameters": {"digits": "1", "birthdate": "19900115"},
@@ -241,7 +242,7 @@ def test_confirm_birthdate_confirm(mocker: MockerFixture) -> None:
     )
     mock_logger_info = mocker.patch("twiliowebhook.api.main.logger.info")
 
-    response = confirm_birthdate()
+    response = confirm_digits("birthdate")
 
     mock_retrieve_ssm_parameters.assert_called_once_with(
         "/twh/dev/twilio-auth-token",
@@ -260,7 +261,7 @@ def test_confirm_birthdate_confirm(mocker: MockerFixture) -> None:
     assert "Thank you. We have recorded your birth date as 01 15, 1990" in response.body
 
 
-def test_confirm_birthdate_re_enter(mocker: MockerFixture) -> None:
+def test_confirm_digits_re_enter(mocker: MockerFixture) -> None:
     mocker.patch("twiliowebhook.api.main.app", return_value=LambdaFunctionUrlResolver())
     mock_event = LambdaFunctionUrlEvent({
         "queryStringParameters": {"digits": "2", "birthdate": "19900115"},
@@ -279,17 +280,17 @@ def test_confirm_birthdate_re_enter(mocker: MockerFixture) -> None:
     mocker.patch("twiliowebhook.api.main.validate_http_twilio_signature")
     mock_logger_info = mocker.patch("twiliowebhook.api.main.logger.info")
 
-    response = confirm_birthdate()
+    response = confirm_digits("birthdate")
 
     mock_logger_info.assert_any_call("User chose to re-enter birth date")
     assert response.status_code == HTTPStatus.OK
     assert response.content_type == "application/xml"
     assert response.body is not None
     assert "Let's try again" in response.body
-    assert "/incoming-call/birthdate" in response.body
+    assert "/handle-incoming-call/birthdate" in response.body
 
 
-def test_confirm_birthdate_invalid_input(mocker: MockerFixture) -> None:
+def test_confirm_digits_invalid_input(mocker: MockerFixture) -> None:
     mocker.patch("twiliowebhook.api.main.app", return_value=LambdaFunctionUrlResolver())
     mock_event = LambdaFunctionUrlEvent({
         "queryStringParameters": {"digits": "9", "birthdate": "19900115"},
@@ -308,7 +309,7 @@ def test_confirm_birthdate_invalid_input(mocker: MockerFixture) -> None:
     mocker.patch("twiliowebhook.api.main.validate_http_twilio_signature")
     mock_logger_warning = mocker.patch("twiliowebhook.api.main.logger.warning")
 
-    response = confirm_birthdate()
+    response = confirm_digits("birthdate")
 
     mock_logger_warning.assert_any_call("Invalid confirmation input: %s", "9")
     assert response.status_code == HTTPStatus.OK
@@ -317,10 +318,10 @@ def test_confirm_birthdate_invalid_input(mocker: MockerFixture) -> None:
     assert (
         "Invalid selection. Please press 1 to confirm or 2 to re-enter" in response.body
     )
-    assert "confirm-birthdate" in response.body
+    assert "confirm-digits/birthdate" in response.body
 
 
-def test_confirm_birthdate_no_digits(mocker: MockerFixture) -> None:
+def test_confirm_digits_no_digits(mocker: MockerFixture) -> None:
     mocker.patch("twiliowebhook.api.main.app", return_value=LambdaFunctionUrlResolver())
     mocker.patch(
         "twiliowebhook.api.main.app.current_event",
@@ -332,13 +333,13 @@ def test_confirm_birthdate_no_digits(mocker: MockerFixture) -> None:
     with pytest.raises(
         BadRequestError, match="Confirmation digits not found in the request"
     ):
-        confirm_birthdate()
+        confirm_digits("birthdate")
     mock_logger_error.assert_called_once_with(
         "Confirmation digits not found in the request"
     )
 
 
-def test_confirm_birthdate_no_birthdate(mocker: MockerFixture) -> None:
+def test_confirm_digits_no_birthdate(mocker: MockerFixture) -> None:
     mocker.patch("twiliowebhook.api.main.app", return_value=LambdaFunctionUrlResolver())
     mocker.patch(
         "twiliowebhook.api.main.app.current_event",
@@ -348,7 +349,43 @@ def test_confirm_birthdate_no_birthdate(mocker: MockerFixture) -> None:
     with pytest.raises(
         BadRequestError, match="Birthdate parameter not found in the request"
     ):
-        confirm_birthdate()
+        confirm_digits("birthdate")
     mock_logger_error.assert_called_once_with(
         "Birthdate parameter not found in the request"
+    )
+
+
+def test_process_digits_invalid_target(mocker: MockerFixture) -> None:
+    mocker.patch("twiliowebhook.api.main.app", return_value=LambdaFunctionUrlResolver())
+    mocker.patch(
+        "twiliowebhook.api.main.app.current_event",
+        new=LambdaFunctionUrlEvent({"queryStringParameters": {"digits": "19900115"}}),
+    )
+    mock_logger_error = mocker.patch("twiliowebhook.api.main.logger.error")
+    with pytest.raises(
+        BadRequestError,
+        match=re.escape("Invalid target: invalid_target. Expected 'birthdate'."),
+    ):
+        process_digits("invalid_target")
+    mock_logger_error.assert_called_once_with(
+        "Invalid target: invalid_target. Expected 'birthdate'."
+    )
+
+
+def test_confirm_digits_invalid_target(mocker: MockerFixture) -> None:
+    mocker.patch("twiliowebhook.api.main.app", return_value=LambdaFunctionUrlResolver())
+    mocker.patch(
+        "twiliowebhook.api.main.app.current_event",
+        new=LambdaFunctionUrlEvent({
+            "queryStringParameters": {"digits": "1", "birthdate": "19900115"}
+        }),
+    )
+    mock_logger_error = mocker.patch("twiliowebhook.api.main.logger.error")
+    with pytest.raises(
+        BadRequestError,
+        match=re.escape("Invalid target: invalid_target. Expected 'birthdate'."),
+    ):
+        confirm_digits("invalid_target")
+    mock_logger_error.assert_called_once_with(
+        "Invalid target: invalid_target. Expected 'birthdate'."
     )

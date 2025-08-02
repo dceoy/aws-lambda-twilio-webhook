@@ -21,6 +21,7 @@ from aws_lambda_powertools.logging import correlation_paths
 from aws_lambda_powertools.utilities.data_classes import LambdaFunctionUrlEvent
 from aws_lambda_powertools.utilities.typing import LambdaContext
 from twilio.base.exceptions import TwilioRestException
+from twilio.http.http_client import TwilioHttpClient
 from twilio.rest import Client
 
 from .awsssm import retrieve_ssm_parameters
@@ -183,6 +184,7 @@ def monitor_call(call_sid: str) -> Response[str]:
         client = Client(
             username=parameters[parameter_names[SSM_TWILIO_ACCOUNT_SID]],
             password=parameters[parameter_names[SSM_TWILIO_AUTH_TOKEN]],
+            http_client=TwilioHttpClient(timeout=10),
         )
         call = client.calls(call_sid).fetch()
         logger.info("Call details fetched successfully", extra={"call_sid": call_sid})
@@ -209,7 +211,7 @@ def monitor_call(call_sid: str) -> Response[str]:
         raise InternalServerError(error_message) from e
 
 
-@app.post("/incoming-call/<twiml_file_stem>")
+@app.post("/handle-incoming-call/<twiml_file_stem>")
 @tracer.capture_method
 def handle_incoming_call(twiml_file_stem: str) -> Response[str]:
     """Handle incoming call and return TwiML response.
@@ -331,8 +333,10 @@ def _build_webhook_urls(webhook_api_url: str) -> dict[str, str]:
     webhook_fqdn = urlparse(webhook_api_url).netloc
     return {
         "fqdn": webhook_fqdn,
-        "confirm": f"{HTTPS_SCHEME}{webhook_fqdn}/confirm-birthdate",
-        "birthdate_entry": f"{HTTPS_SCHEME}{webhook_fqdn}/incoming-call/birthdate",
+        "confirm": f"{HTTPS_SCHEME}{webhook_fqdn}/confirm-digits/birthdate",
+        "birthdate_entry": (
+            f"{HTTPS_SCHEME}{webhook_fqdn}/handle-incoming-call/birthdate"
+        ),
     }
 
 
@@ -404,13 +408,14 @@ def lambda_handler(event: dict[str, Any], context: LambdaContext) -> dict[str, A
     return app.resolve(event=event, context=context)
 
 
-@app.post("/process-birthdate")
+@app.post("/process-digits/<target>")
 @tracer.capture_method
-def process_birthdate() -> Response[str]:
-    """Process birth date input and return TwiML response.
+def process_digits(target: str) -> Response[str]:
+    """Process the digits entered by the user and return a TwiML response.
 
     Returns:
         Response[str]: TwiML response after processing birth date.
+        target (str): The target for the digits, expected to be "birthdate".
 
     Raises:
         BadRequestError: If the birth date is missing or invalid.
@@ -418,6 +423,10 @@ def process_birthdate() -> Response[str]:
         InternalServerError: If there's an error processing the request.
 
     """
+    if target != "birthdate":
+        error_message = f"Invalid target: {target}. Expected 'birthdate'."
+        logger.error(error_message)
+        raise BadRequestError(error_message)
     digits = app.current_event["queryStringParameters"].get("digits")
     if not digits:
         logger.error(ERROR_BIRTHDATE_DIGITS_NOT_FOUND)
@@ -491,13 +500,14 @@ def process_birthdate() -> Response[str]:
         )
 
 
-@app.post("/confirm-birthdate")
+@app.post("/confirm-digits/<target>")
 @tracer.capture_method
-def confirm_birthdate() -> Response[str]:
-    """Handle birthdate confirmation and return TwiML response.
+def confirm_digits(target: str) -> Response[str]:
+    """Confirm the digits entered by the user and return a TwiML response.
 
     Returns:
         Response[str]: TwiML response after processing confirmation.
+        target (str): The target for the digits, expected to be "birthdate".
 
     Raises:
         BadRequestError: If the confirmation input is missing or invalid.
@@ -505,6 +515,10 @@ def confirm_birthdate() -> Response[str]:
         InternalServerError: If there's an error processing the request.
 
     """
+    if target != "birthdate":
+        error_message = f"Invalid target: {target}. Expected 'birthdate'."
+        logger.error(error_message)
+        raise BadRequestError(error_message)
     query_params = app.current_event["queryStringParameters"]
     digits = query_params.get("digits")
     birthdate = query_params.get("birthdate")

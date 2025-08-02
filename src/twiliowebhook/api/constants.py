@@ -49,9 +49,9 @@ DTMF_OPERATOR_TRANSFER = "2"
 # URL Paths
 HEALTH_ENDPOINT = "/health"
 TRANSFER_CALL_ENDPOINT = "/transfer-call"
-INCOMING_CALL_ENDPOINT = "/incoming-call/<twiml_file_stem>"
-PROCESS_BIRTHDATE_PATH = "/process-birthdate"
-CONFIRM_BIRTHDATE_PATH = "/confirm-birthdate"
+INCOMING_CALL_ENDPOINT = "/handle-incoming-call/<twiml_file_stem>"
+PROCESS_BIRTHDATE_PATH = "/process-digits/birthdate"
+CONFIRM_BIRTHDATE_PATH = "/confirm-digits/birthdate"
 
 # URL Components
 HTTPS_SCHEME = "https://"

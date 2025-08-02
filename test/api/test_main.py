@@ -406,9 +406,12 @@ def test_monitor_call_success(mocker: MockerFixture) -> None:
     )
 
     # Verify Twilio client was initialized correctly
-    mock_client_class.assert_called_once_with(
-        username="test-account-sid", password="test-token"
-    )
+    mock_client_class.assert_called_once()
+    call_args = mock_client_class.call_args
+    assert call_args.kwargs["username"] == "test-account-sid"
+    assert call_args.kwargs["password"] == "test-token"
+    # Check that http_client is passed (we don't need to check the exact type in tests)
+    assert "http_client" in call_args.kwargs
 
     # Verify call fetch was called
     mock_calls.assert_called_once_with(call_sid)
