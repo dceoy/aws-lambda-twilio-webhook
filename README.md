@@ -1,5 +1,4 @@
-aws-lambda-twilio-webhook
-=========================
+# aws-lambda-twilio-webhook
 
 A secure, containerized AWS Lambda function for handling Twilio webhooks with voice call processing capabilities. This serverless application provides an intelligent Interactive Voice Response (IVR) system with operator transfer functionality, birthdate collection, and secure TwiML template-based responses.
 
@@ -33,11 +32,13 @@ A secure, containerized AWS Lambda function for handling Twilio webhooks with vo
 ### Development Setup
 
 Install UV package manager (if not already installed):
+
 ```bash
 curl -LsSf https://astral.sh/uv/install.sh | sh
 ```
 
 Clone the repository and install dependencies:
+
 ```bash
 git clone https://github.com/dceoy/aws-lambda-twilio-webhook.git
 cd aws-lambda-twilio-webhook
@@ -51,18 +52,23 @@ uv sync --all-extras
 The Lambda function exposes three main endpoints via AWS Lambda Function URLs:
 
 #### Health Check
+
 ```http
 GET /health
 ```
+
 Returns health status of the Lambda function.
 
 #### Incoming Call Handler
+
 ```http
 POST /handle-incoming-call/{twiml_file_stem}
 ```
+
 Handles incoming Twilio voice calls and returns appropriate TwiML responses based on the template specified in `twiml_file_stem`.
 
 **Available Templates:**
+
 - `connect` - Connects to voice assistant
 - `gather` - IVR menu with DTMF collection
 - `dial` - Direct operator transfer
@@ -70,26 +76,33 @@ Handles incoming Twilio voice calls and returns appropriate TwiML responses base
 - `hangup` - Call termination
 
 #### Call Transfer Handler
+
 ```http
 POST /transfer-call
 ```
+
 Processes DTMF input from IVR interactions and routes calls accordingly.
 
 #### Call Monitoring
+
 ```http
 GET /monitor-call/{call_sid}
 ```
+
 Retrieves detailed information about a specific call using its SID.
 
 **Response:** JSON object containing call details including status, duration, from/to numbers, and other call metadata.
 
 #### Batch Call Monitoring
+
 ```http
 GET /batch-monitor-calls
 ```
+
 Retrieves multiple calls within a specified date range with pagination support.
 
 **Query Parameters:**
+
 - `start_date` (required) - Start date in ISO 8601 format (e.g., 2024-01-01T00:00:00Z)
 - `end_date` (required) - End date in ISO 8601 format
 - `status` (optional) - Filter by call status (e.g., completed, busy, failed, no-answer)
@@ -98,28 +111,35 @@ Retrieves multiple calls within a specified date range with pagination support.
 - `page_token` (optional) - Token for pagination
 
 **Response:** JSON object containing:
+
 - `calls` - Array of call details
 - `count` - Number of calls in current page
 - `next_page_token` - Token for next page (if available)
 
 #### Process Digits Handler
+
 ```http
 POST /process-digits/{target}
 ```
+
 Processes user input digits. Currently supports `birthdate` as the target.
 
 **For birthdate processing:**
+
 - Accepts 8-digit input in YYYYMMDD format
 - Returns TwiML with confirmation prompt
 - Validates date format and provides appropriate error messages
 
 #### Confirm Digits Handler
+
 ```http
 POST /confirm-digits/{target}
 ```
+
 Handles user confirmation of previously entered digits. Currently supports `birthdate` as the target.
 
 **For birthdate confirmation:**
+
 - Press 1 to confirm the entered birthdate
 - Press 2 to re-enter the birthdate
 - Any other input triggers an invalid input message
@@ -158,16 +178,19 @@ Values in `{}` placeholders are dynamically replaced with configuration from AWS
 ### Testing
 
 Run the complete test suite:
+
 ```bash
 uv run pytest
 ```
 
 Run specific test file:
+
 ```bash
 uv run pytest test/api/test_main.py
 ```
 
 Run tests with verbose output and coverage:
+
 ```bash
 uv run pytest -v --cov=src --cov-report=term-missing
 ```
@@ -175,21 +198,25 @@ uv run pytest -v --cov=src --cov-report=term-missing
 ### Code Quality
 
 Format code:
+
 ```bash
 uv run ruff format .
 ```
 
 Lint code:
+
 ```bash
 uv run ruff check .
 ```
 
 Auto-fix linting issues:
+
 ```bash
 uv run ruff check --fix .
 ```
 
 Type checking:
+
 ```bash
 uv run pyright
 ```
@@ -199,11 +226,13 @@ uv run pyright
 ### Docker Build
 
 Build the container image locally:
+
 ```bash
 docker image build -t dceoy/aws-lambda-twilio-webhook:latest .
 ```
 
 Build using docker buildx (used in CI/CD):
+
 ```bash
 docker buildx bake
 ```
@@ -219,6 +248,7 @@ docker buildx bake
 ### Environment Variables
 
 Required environment variables for the Lambda function:
+
 - `AWS_REGION` - AWS region for SSM Parameter Store access
 - `LOG_LEVEL` - Logging level (DEBUG, INFO, WARN, ERROR)
 - `SYSTEM_NAME` - System identifier for SSM parameter paths (default: "twh")

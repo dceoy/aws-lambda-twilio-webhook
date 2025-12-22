@@ -43,7 +43,12 @@ def validate_http_twilio_signature(token: str, event: LambdaFunctionUrlEvent) ->
         if query_parameters
         else ""
     )
-    uri = f"{HTTPS_SCHEME}{event.request_context.domain_name}{event.path}{query_string}"
+    domain_name = (
+        event.headers.get("x-forwarded-host")
+        or event.headers.get("X-Forwarded-Host")
+        or event.request_context.domain_name
+    )
+    uri = f"{HTTPS_SCHEME}{domain_name}{event.path}{query_string}"
     logger.info("uri: %s", uri)
     logger.info("event.decoded_body: %s", event.decoded_body)
     params = dict(parse_qsl(event.decoded_body, keep_blank_values=True))

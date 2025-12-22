@@ -34,20 +34,20 @@ flowchart TD
     D --> E{Signature valid?}
     E -->|No| F[HTTP 401 Unauthorized]
     E -->|Yes| G{Check digits value}
-    
+
     G -->|digits=1| H[Load connect.twiml.xml]
     H --> I[Update Stream URL with media API]
     I --> J[Set caller phone in Stream Parameter]
     J --> K[Return Voice Assistant TwiML]
-    
+
     G -->|digits=2| L[Load dial.twiml.xml]
     L --> M[Format operator number to E164]
     M --> N[Set dial target]
     N --> O[Return Operator Transfer TwiML]
-    
+
     G -->|Other digits| P[Load hangup.twiml.xml]
     P --> Q[Return Hangup TwiML]
-    
+
     C --> R[SSM Parameters:<br/>- twilio-auth-token<br/>- media-api-url<br/>- operator-phone-number]
 ```
 
@@ -63,12 +63,12 @@ flowchart TD
     F -->|No| G[HTTP 404 Bad Request]
     F -->|Yes| H[Return call details JSON]
     H --> I[HTTP 200 OK]
-    
+
     E --> J{Twilio API error?}
     J -->|Yes| K{Error code 20404?}
     K -->|Yes| G
     K -->|No| L[HTTP 500 Internal Server Error]
-    
+
     B --> M[SSM Parameters:<br/>- twilio-account-sid<br/>- twilio-auth-token]
 ```
 
@@ -87,13 +87,13 @@ flowchart TD
     I --> J[Format response with pagination]
     J --> K[Return JSON response]
     K --> L[HTTP 200 OK]
-    
+
     C --> M[Validation checks:<br/>- start_date required<br/>- end_date required<br/>- Valid date format<br/>- start_date <= end_date<br/>- limit 1-1000]
-    
+
     H --> N[Optional filters:<br/>- status<br/>- direction<br/>- page_token]
-    
+
     J --> O[Response includes:<br/>- calls array<br/>- count<br/>- next_page_token]
-    
+
     F --> P[SSM Parameters:<br/>- twilio-account-sid<br/>- twilio-auth-token]
 ```
 
@@ -111,20 +111,20 @@ flowchart TD
     H -->|No| I[HTTP 401 Unauthorized]
     H -->|Yes| J[Load TwiML template]
     J --> K{Template type?}
-    
+
     K -->|connect.twiml.xml| L[Set media stream URL]
     L --> M[Set caller phone parameter]
     M --> N[Return Voice Assistant TwiML]
-    
+
     K -->|gather.twiml.xml| O[Set webhook callback URL]
     O --> P[Return IVR Menu TwiML]
-    
+
     K -->|birthdate.twiml.xml| Q[Set birthdate processing URL]
     Q --> R[Return Birthdate Input TwiML]
-    
+
     K -->|Other templates| S[Use template as-is]
     S --> T[Return Static TwiML]
-    
+
     F --> U[SSM Parameters:<br/>- twilio-auth-token<br/>- media-api-url<br/>- webhook-api-url]
 ```
 
@@ -148,7 +148,7 @@ flowchart TD
     N --> O[Set confirmation callback URL]
     O --> P[Set retry redirect URL]
     P --> Q[Return Confirmation TwiML]
-    
+
     I --> R[SSM Parameters:<br/>- twilio-auth-token<br/>- webhook-api-url]
 ```
 
@@ -162,17 +162,17 @@ flowchart TD
     D --> E{Signature valid?}
     E -->|No| F[HTTP 401 Unauthorized]
     E -->|Yes| G{Check digits value}
-    
+
     G -->|digits=1| H[Load birthdate-confirmed.twiml.xml]
     H --> I[Return Success Message TwiML]
-    
+
     G -->|digits=2| J[Load birthdate-retry.twiml.xml]
     J --> K[Set redirect to birthdate entry]
     K --> L[Return Retry TwiML]
-    
+
     G -->|Other digits| M[Load birthdate-invalid-input.twiml.xml]
     M --> N[Return Invalid Input TwiML]
-    
+
     C --> O[SSM Parameters:<br/>- twilio-auth-token<br/>- webhook-api-url]
 ```
 
@@ -183,18 +183,18 @@ flowchart TD
     A[Incoming Call] --> B[POST /incoming-call/gather]
     B --> C[Return IVR Menu TwiML]
     C --> D[User presses DTMF key]
-    
+
     D --> E[POST /transfer-call?digits=X]
     E --> F{Digits value?}
-    
+
     F -->|"1"| G[Connect to Voice Assistant]
     G --> H[Media Stream established]
-    
+
     F -->|"2"| I[Transfer to Operator]
     I --> J[Call forwarded to operator]
-    
+
     F -->|Other| K[Hangup call]
-    
+
     style A fill:#e1f5fe
     style H fill:#e8f5e8
     style J fill:#e8f5e8
@@ -208,24 +208,24 @@ flowchart TD
     A[Incoming Call] --> B[POST /incoming-call/birthdate]
     B --> C[Play birthdate prompt]
     C --> D[User enters 8 digits]
-    
+
     D --> E[POST /process-birthdate?digits=YYYYMMDD]
     E --> F{Valid format?}
     F -->|No| G[Return error TwiML]
     F -->|Yes| H[Parse date components]
     H --> I[Play confirmation prompt]
-    
+
     I --> J[User confirms/retries]
     J --> K[POST /confirm-birthdate?digits=X&birthdate=YYYYMMDD]
     K --> L{Confirmation choice?}
-    
+
     L -->|"1" - Confirm| M[Play success message]
     L -->|"2" - Retry| N[Redirect to birthdate entry]
     L -->|Other| O[Play invalid input message]
-    
+
     N --> C
     O --> I
-    
+
     style A fill:#e1f5fe
     style M fill:#e8f5e8
     style G fill:#fff3e0
@@ -250,9 +250,9 @@ flowchart TD
     L --> M[Dynamic Value Injection]
     M --> N[Generate TwiML Response]
     N --> O[Return XML to Twilio]
-    
+
     E --> P[Secure Parameters:<br/>- twilio-auth-token<br/>- media-api-url<br/>- operator-phone-number<br/>- webhook-api-url]
-    
+
     style E fill:#fff3e0
     style G fill:#e8f5e8
     style L fill:#e8f5e8

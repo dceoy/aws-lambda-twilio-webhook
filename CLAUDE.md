@@ -5,6 +5,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 ## Essential Commands
 
 ### Development Setup
+
 ```bash
 # Install UV (if not already installed)
 curl -LsSf https://astral.sh/uv/install.sh | sh
@@ -14,6 +15,7 @@ uv sync --all-extras
 ```
 
 ### Testing
+
 ```bash
 # Run all tests with coverage
 uv run pytest
@@ -26,6 +28,7 @@ uv run pytest -v
 ```
 
 ### Code Quality
+
 ```bash
 # Run linting with Ruff
 uv run ruff check .
@@ -41,6 +44,7 @@ uv run pyright
 ```
 
 ### Building and Deployment
+
 ```bash
 # Build Docker image locally
 docker image build -t dceoy/aws-lambda-twilio-webhook:latest .
@@ -55,7 +59,7 @@ This is an AWS Lambda function that handles Twilio webhooks for voice calls. The
 
 ### Core Components
 
-1. **Lambda Handler** (`src/twiliowebhook/api/main.py`): 
+1. **Lambda Handler** (`src/twiliowebhook/api/main.py`):
    - Implements URL routing for Lambda Function URLs
    - Endpoints:
      - `/health` (GET) - Health check
@@ -70,7 +74,7 @@ This is an AWS Lambda function that handles Twilio webhooks for voice calls. The
 
 2. **TwiML Templates** (`src/twiliowebhook/twiml/`):
    - XML templates for Twilio responses
-   - Templates: 
+   - Templates:
      - `connect.twiml.xml` - Connect to voice assistant
      - `dial.twiml.xml` - Operator transfer
      - `gather.twiml.xml` - IVR menu with DTMF collection
@@ -115,6 +119,7 @@ This is an AWS Lambda function that handles Twilio webhooks for voice calls. The
 ## Testing Approach
 
 Tests use pytest with extensive mocking of AWS services and external dependencies. When writing tests:
+
 - Mock AWS SSM calls using `pytest-mock`
 - Mock Twilio signature validation for unit tests
 - Use parametrized tests for different scenarios
