@@ -20,12 +20,13 @@ from aws_lambda_powertools.event_handler.exceptions import (
 )
 from aws_lambda_powertools.logging import correlation_paths
 from aws_lambda_powertools.utilities.data_classes import LambdaFunctionUrlEvent
+from aws_lambda_powertools.utilities.parameters import get_parameters_by_name
+from aws_lambda_powertools.utilities.parameters.exceptions import GetParameterError
 from aws_lambda_powertools.utilities.typing import LambdaContext
 from twilio.base.exceptions import TwilioRestException
 from twilio.http.http_client import TwilioHttpClient
 from twilio.rest import Client
 
-from .awsssm import retrieve_ssm_parameters
 from .constants import (
     BIRTHDATE_CONFIRMATION_TWIML_FILE_PATH,
     BIRTHDATE_CONFIRMED_TWIML_FILE_PATH,
@@ -43,6 +44,7 @@ from .constants import (
     ERROR_BIRTHDATE_DIGITS_NOT_FOUND,
     ERROR_CALL_NUMBER_NOT_FOUND,
     ERROR_DIGITS_NOT_FOUND,
+    ERROR_INVALID_PARAMETERS,
     FORM_PARAM_FROM,
     GATHER_TWIML_FILE_PATH,
     HANGUP_TWIML_FILE_PATH,
@@ -118,7 +120,15 @@ def transfer_call(country_code: str = "US") -> Response[str]:
         ]
     }
     try:
-        parameters = retrieve_ssm_parameters(*parameter_names.values())
+        parameters = get_parameters_by_name(
+            parameters={name: {} for name in parameter_names.values()},
+            decrypt=True,
+            raise_on_error=True,
+        )
+        logger.info(
+            "Parameters are retrieved from Parameter Store: %s",
+            list(parameter_names.values()),
+        )
         validate_http_twilio_signature(
             token=parameters[parameter_names[SSM_TWILIO_AUTH_TOKEN]],
             event=app.current_event,
@@ -151,6 +161,11 @@ def transfer_call(country_code: str = "US") -> Response[str]:
     except (BadRequestError, UnauthorizedError) as e:
         logger.exception(e.msg)
         raise
+    except GetParameterError as e:
+        log_message = ERROR_INVALID_PARAMETERS.format(f"[{e}]")
+        error_message = ERROR_INVALID_PARAMETERS.format(str(e))
+        logger.exception(log_message)
+        raise InternalServerError(error_message) from e
     except Exception as e:
         error_message = str(e)
         logger.exception(error_message)
@@ -183,7 +198,15 @@ def monitor_call(call_sid: str) -> Response[str]:
         for k in [SSM_TWILIO_ACCOUNT_SID, SSM_TWILIO_AUTH_TOKEN]
     }
     try:
-        parameters = retrieve_ssm_parameters(*parameter_names.values())
+        parameters = get_parameters_by_name(
+            parameters={name: {} for name in parameter_names.values()},
+            decrypt=True,
+            raise_on_error=True,
+        )
+        logger.info(
+            "Parameters are retrieved from Parameter Store: %s",
+            list(parameter_names.values()),
+        )
         client = Client(
             username=parameters[parameter_names[SSM_TWILIO_ACCOUNT_SID]],
             password=parameters[parameter_names[SSM_TWILIO_AUTH_TOKEN]],
@@ -204,9 +227,16 @@ def monitor_call(call_sid: str) -> Response[str]:
         error_message = f"Twilio API error: {e.msg}"
         logger.exception(error_message)
         raise InternalServerError(error_message) from e
-    except ValueError as e:
-        error_message = f"Invalid parameter configuration: {e!s}"
-        logger.exception(error_message)
+    except (ValueError, GetParameterError) as e:
+        if isinstance(e, GetParameterError):
+            log_detail = ERROR_INVALID_PARAMETERS.format(f"[{e}]")
+            detail = ERROR_INVALID_PARAMETERS.format(str(e))
+        else:
+            log_detail = str(e)
+            detail = log_detail
+        log_message = f"Invalid parameter configuration: {log_detail}"
+        error_message = f"Invalid parameter configuration: {detail}"
+        logger.exception(log_message)
         raise InternalServerError(error_message) from e
     except Exception as e:
         error_message = f"Failed to fetch call details: {e!s}"
@@ -313,7 +343,15 @@ def batch_monitor_calls() -> Response[str]:
             k: f"/{SYSTEM_NAME}/{ENV_TYPE}/{k}"
             for k in [SSM_TWILIO_ACCOUNT_SID, SSM_TWILIO_AUTH_TOKEN]
         }
-        parameters = retrieve_ssm_parameters(*parameter_names.values())
+        parameters = get_parameters_by_name(
+            parameters={name: {} for name in parameter_names.values()},
+            decrypt=True,
+            raise_on_error=True,
+        )
+        logger.info(
+            "Parameters are retrieved from Parameter Store: %s",
+            list(parameter_names.values()),
+        )
 
         # Create Twilio client
         client = Client(
@@ -360,6 +398,17 @@ def batch_monitor_calls() -> Response[str]:
             content_type=CONTENT_TYPE_JSON,
             body=json.dumps(response_data),
         )
+    except GetParameterError as e:
+        log_message = (
+            "Invalid date format or parameter configuration: "
+            f"{ERROR_INVALID_PARAMETERS.format(f'[{e}]')}"
+        )
+        error_message = (
+            "Invalid date format or parameter configuration: "
+            f"{ERROR_INVALID_PARAMETERS.format(str(e))}"
+        )
+        logger.exception(log_message)
+        raise BadRequestError(error_message) from e
     except ValueError as e:
         error_message = f"Invalid date format or parameter configuration: {e!s}"
         logger.exception(error_message)
@@ -410,7 +459,15 @@ def handle_incoming_call(twiml_file_stem: str) -> Response[str]:
         ]
     }
     try:
-        parameters = retrieve_ssm_parameters(*parameter_names.values())
+        parameters = get_parameters_by_name(
+            parameters={name: {} for name in parameter_names.values()},
+            decrypt=True,
+            raise_on_error=True,
+        )
+        logger.info(
+            "Parameters are retrieved from Parameter Store: %s",
+            list(parameter_names.values()),
+        )
         validate_http_twilio_signature(
             token=parameters[parameter_names[SSM_TWILIO_AUTH_TOKEN]],
             event=app.current_event,
@@ -418,6 +475,11 @@ def handle_incoming_call(twiml_file_stem: str) -> Response[str]:
     except (BadRequestError, UnauthorizedError) as e:
         logger.exception(e.msg)
         raise
+    except GetParameterError as e:
+        log_message = ERROR_INVALID_PARAMETERS.format(f"[{e}]")
+        error_message = ERROR_INVALID_PARAMETERS.format(str(e))
+        logger.exception(log_message)
+        raise InternalServerError(error_message) from e
     except Exception as e:
         error_message = str(e)
         logger.exception(error_message)
@@ -613,7 +675,15 @@ def process_digits(target: str) -> Response[str]:
     }
 
     try:
-        parameters = retrieve_ssm_parameters(*parameter_names.values())
+        parameters = get_parameters_by_name(
+            parameters={name: {} for name in parameter_names.values()},
+            decrypt=True,
+            raise_on_error=True,
+        )
+        logger.info(
+            "Parameters are retrieved from Parameter Store: %s",
+            list(parameter_names.values()),
+        )
         validate_http_twilio_signature(
             token=parameters[parameter_names[SSM_TWILIO_AUTH_TOKEN]],
             event=app.current_event,
@@ -655,6 +725,11 @@ def process_digits(target: str) -> Response[str]:
     except (BadRequestError, UnauthorizedError) as e:
         logger.exception(e.msg)
         raise
+    except GetParameterError as e:
+        log_message = ERROR_INVALID_PARAMETERS.format(f"[{e}]")
+        error_message = ERROR_INVALID_PARAMETERS.format(str(e))
+        logger.exception(log_message)
+        raise InternalServerError(error_message) from e
     except Exception as e:
         error_message = str(e)
         logger.exception(error_message)
@@ -708,7 +783,15 @@ def confirm_digits(target: str) -> Response[str]:
     }
 
     try:
-        parameters = retrieve_ssm_parameters(*parameter_names.values())
+        parameters = get_parameters_by_name(
+            parameters={name: {} for name in parameter_names.values()},
+            decrypt=True,
+            raise_on_error=True,
+        )
+        logger.info(
+            "Parameters are retrieved from Parameter Store: %s",
+            list(parameter_names.values()),
+        )
         validate_http_twilio_signature(
             token=parameters[parameter_names[SSM_TWILIO_AUTH_TOKEN]],
             event=app.current_event,
@@ -758,6 +841,11 @@ def confirm_digits(target: str) -> Response[str]:
     except (BadRequestError, UnauthorizedError) as e:
         logger.exception(e.msg)
         raise
+    except GetParameterError as e:
+        log_message = ERROR_INVALID_PARAMETERS.format(f"[{e}]")
+        error_message = ERROR_INVALID_PARAMETERS.format(str(e))
+        logger.exception(log_message)
+        raise InternalServerError(error_message) from e
     except Exception as e:
         error_message = str(e)
         logger.exception(error_message)

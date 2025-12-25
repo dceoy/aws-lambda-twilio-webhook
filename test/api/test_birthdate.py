@@ -41,8 +41,8 @@ def test_handle_incoming_call_birthdate(mocker: MockerFixture) -> None:
     twilio_auth_token = "test-token"
     media_api_url = "wss://api.example.com"
     webhook_api_url = "https://api.example.com"
-    mock_retrieve_ssm_parameters = mocker.patch(
-        "twiliowebhook.api.main.retrieve_ssm_parameters",
+    mock_get_parameters_by_name = mocker.patch(
+        "twiliowebhook.api.main.get_parameters_by_name",
         return_value={
             "/twh/dev/twilio-auth-token": twilio_auth_token,
             "/twh/dev/media-api-url": media_api_url,
@@ -54,10 +54,14 @@ def test_handle_incoming_call_birthdate(mocker: MockerFixture) -> None:
         return_value=None,
     )
     response: Response[str] = handle_incoming_call(twiml_file_stem="birthdate")
-    mock_retrieve_ssm_parameters.assert_called_once_with(
-        "/twh/dev/twilio-auth-token",
-        "/twh/dev/media-api-url",
-        "/twh/dev/webhook-api-url",
+    mock_get_parameters_by_name.assert_called_once_with(
+        parameters={
+            "/twh/dev/twilio-auth-token": {},
+            "/twh/dev/media-api-url": {},
+            "/twh/dev/webhook-api-url": {},
+        },
+        decrypt=True,
+        raise_on_error=True,
     )
     mock_validate_http_twilio_signature.assert_called_once_with(
         token=twilio_auth_token,
@@ -93,8 +97,8 @@ def test_process_digits_valid(
     mocker.patch("twiliowebhook.api.main.app.current_event", new=mock_event)
     twilio_auth_token = "test-token"
     webhook_api_url = "https://api.example.com"
-    mock_retrieve_ssm_parameters = mocker.patch(
-        "twiliowebhook.api.main.retrieve_ssm_parameters",
+    mock_get_parameters_by_name = mocker.patch(
+        "twiliowebhook.api.main.get_parameters_by_name",
         return_value={
             "/twh/dev/twilio-auth-token": twilio_auth_token,
             "/twh/dev/webhook-api-url": webhook_api_url,
@@ -107,9 +111,13 @@ def test_process_digits_valid(
 
     response = process_digits("birthdate")
 
-    mock_retrieve_ssm_parameters.assert_called_once_with(
-        "/twh/dev/twilio-auth-token",
-        "/twh/dev/webhook-api-url",
+    mock_get_parameters_by_name.assert_called_once_with(
+        parameters={
+            "/twh/dev/twilio-auth-token": {},
+            "/twh/dev/webhook-api-url": {},
+        },
+        decrypt=True,
+        raise_on_error=True,
     )
     mock_validate_http_twilio_signature.assert_called_once_with(
         token=twilio_auth_token,
@@ -173,7 +181,7 @@ def test_process_digits_ssm_error(mocker: MockerFixture) -> None:
     )
     error_message = "SSM error"
     mocker.patch(
-        "twiliowebhook.api.main.retrieve_ssm_parameters",
+        "twiliowebhook.api.main.get_parameters_by_name",
         side_effect=Exception(error_message),
     )
     mock_logger_exception = mocker.patch("twiliowebhook.api.main.logger.exception")
@@ -201,7 +209,7 @@ def test_process_digits_invalid_signature(
         }),
     )
     mocker.patch(
-        "twiliowebhook.api.main.retrieve_ssm_parameters",
+        "twiliowebhook.api.main.get_parameters_by_name",
         return_value={
             "/twh/dev/twilio-auth-token": "token",
             "/twh/dev/webhook-api-url": "https://api.example.com",
@@ -226,8 +234,8 @@ def test_confirm_digits_confirm(mocker: MockerFixture) -> None:
     mocker.patch("twiliowebhook.api.main.app.current_event", new=mock_event)
     twilio_auth_token = "test-token"
     webhook_api_url = "https://api.example.com"
-    mock_retrieve_ssm_parameters = mocker.patch(
-        "twiliowebhook.api.main.retrieve_ssm_parameters",
+    mock_get_parameters_by_name = mocker.patch(
+        "twiliowebhook.api.main.get_parameters_by_name",
         return_value={
             "/twh/dev/twilio-auth-token": twilio_auth_token,
             "/twh/dev/webhook-api-url": webhook_api_url,
@@ -244,9 +252,13 @@ def test_confirm_digits_confirm(mocker: MockerFixture) -> None:
 
     response = confirm_digits("birthdate")
 
-    mock_retrieve_ssm_parameters.assert_called_once_with(
-        "/twh/dev/twilio-auth-token",
-        "/twh/dev/webhook-api-url",
+    mock_get_parameters_by_name.assert_called_once_with(
+        parameters={
+            "/twh/dev/twilio-auth-token": {},
+            "/twh/dev/webhook-api-url": {},
+        },
+        decrypt=True,
+        raise_on_error=True,
     )
     mock_validate_http_twilio_signature.assert_called_once_with(
         token=twilio_auth_token,
@@ -271,7 +283,7 @@ def test_confirm_digits_re_enter(mocker: MockerFixture) -> None:
     twilio_auth_token = "test-token"
     webhook_api_url = "https://api.example.com"
     mocker.patch(
-        "twiliowebhook.api.main.retrieve_ssm_parameters",
+        "twiliowebhook.api.main.get_parameters_by_name",
         return_value={
             "/twh/dev/twilio-auth-token": twilio_auth_token,
             "/twh/dev/webhook-api-url": webhook_api_url,
@@ -300,7 +312,7 @@ def test_confirm_digits_invalid_input(mocker: MockerFixture) -> None:
     twilio_auth_token = "test-token"
     webhook_api_url = "https://api.example.com"
     mocker.patch(
-        "twiliowebhook.api.main.retrieve_ssm_parameters",
+        "twiliowebhook.api.main.get_parameters_by_name",
         return_value={
             "/twh/dev/twilio-auth-token": twilio_auth_token,
             "/twh/dev/webhook-api-url": webhook_api_url,

@@ -130,6 +130,9 @@ ignore = [
 [tool.ruff.lint.pydocstyle]
 convention = "google"
 
+[tool.ruff.lint.pylint]
+max-statements = 60
+
 [tool.pyright]
 typeCheckingMode = "strict"
 exclude = ["build", ".venv"]

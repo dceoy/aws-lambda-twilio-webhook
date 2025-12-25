@@ -18,6 +18,7 @@ from aws_lambda_powertools.event_handler.exceptions import (
     UnauthorizedError,
 )
 from aws_lambda_powertools.utilities.data_classes import LambdaFunctionUrlEvent
+from aws_lambda_powertools.utilities.parameters.exceptions import GetParameterError
 from defusedxml import ElementTree
 from pytest_mock import MockerFixture
 
@@ -84,8 +85,8 @@ def test_transfer_call(
     twilio_auth_token = "test-token"
     media_api_url = "wss://media.example.com"
     operator_phone_number = "+1112223333"
-    mock_retrieve_ssm_parameters = mocker.patch(
-        "twiliowebhook.api.main.retrieve_ssm_parameters",
+    mock_get_parameters_by_name = mocker.patch(
+        "twiliowebhook.api.main.get_parameters_by_name",
         return_value={
             "/twh/dev/twilio-auth-token": twilio_auth_token,
             "/twh/dev/media-api-url": media_api_url,
@@ -100,10 +101,14 @@ def test_transfer_call(
         return_value=ElementTree.parse(twiml_file_path).getroot(),
     )
     response = transfer_call()
-    mock_retrieve_ssm_parameters.assert_called_once_with(
-        "/twh/dev/twilio-auth-token",
-        "/twh/dev/media-api-url",
-        "/twh/dev/operator-phone-number",
+    mock_get_parameters_by_name.assert_called_once_with(
+        parameters={
+            "/twh/dev/twilio-auth-token": {},
+            "/twh/dev/media-api-url": {},
+            "/twh/dev/operator-phone-number": {},
+        },
+        decrypt=True,
+        raise_on_error=True,
     )
     mock_validate_http_twilio_signature.assert_called_once_with(
         token=twilio_auth_token,
@@ -144,7 +149,7 @@ def test_transfer_call_ssm_error(mocker: MockerFixture) -> None:
     )
     error_message = "SSM error"
     mocker.patch(
-        "twiliowebhook.api.main.retrieve_ssm_parameters",
+        "twiliowebhook.api.main.get_parameters_by_name",
         side_effect=Exception(error_message),
     )
     mock_logger_exception = mocker.patch("twiliowebhook.api.main.logger.exception")
@@ -172,7 +177,7 @@ def test_transfer_call_invalid_signature(
         }),
     )
     mocker.patch(
-        "twiliowebhook.api.main.retrieve_ssm_parameters",
+        "twiliowebhook.api.main.get_parameters_by_name",
         return_value={"/twh/dev/twilio-auth-token": "token"},
     )
     mocker.patch(
@@ -198,8 +203,8 @@ def test_handle_incoming_call(mocker: MockerFixture) -> None:
     twilio_auth_token = "test-token"
     media_api_url = "wss://api.example.com"
     webhook_api_url = "https://api.example.com"
-    mock_retrieve_ssm_parameters = mocker.patch(
-        "twiliowebhook.api.main.retrieve_ssm_parameters",
+    mock_get_parameters_by_name = mocker.patch(
+        "twiliowebhook.api.main.get_parameters_by_name",
         return_value={
             "/twh/dev/twilio-auth-token": twilio_auth_token,
             "/twh/dev/media-api-url": media_api_url,
@@ -219,10 +224,14 @@ def test_handle_incoming_call(mocker: MockerFixture) -> None:
         ),
     )
     response: Response[str] = handle_incoming_call(twiml_file_stem="connect")
-    mock_retrieve_ssm_parameters.assert_called_once_with(
-        "/twh/dev/twilio-auth-token",
-        "/twh/dev/media-api-url",
-        "/twh/dev/webhook-api-url",
+    mock_get_parameters_by_name.assert_called_once_with(
+        parameters={
+            "/twh/dev/twilio-auth-token": {},
+            "/twh/dev/media-api-url": {},
+            "/twh/dev/webhook-api-url": {},
+        },
+        decrypt=True,
+        raise_on_error=True,
     )
     mock_validate_http_twilio_signature.assert_called_once_with(
         token=twilio_auth_token,
@@ -248,10 +257,11 @@ def test_handle_incoming_call_invalid_parameters(mocker: MockerFixture) -> None:
         "twiliowebhook.api.main._fetch_caller_phone_number_from_request",
         return_value="+1234567890",
     )
-    error_message: str = "Invalid parameters"
+    error_detail: str = "SSM parameter error"
+    error_message: str = f"Invalid parameters: [{error_detail}]"
     mocker.patch(
-        "twiliowebhook.api.main.retrieve_ssm_parameters",
-        side_effect=ValueError(error_message),
+        "twiliowebhook.api.main.get_parameters_by_name",
+        side_effect=GetParameterError(error_detail),
     )
     mock_logger_exception = mocker.patch("twiliowebhook.api.main.logger.exception")
     with pytest.raises(InternalServerError, match=error_message):
@@ -279,7 +289,7 @@ def test_handle_incoming_call_invalid_signature(
         "twiliowebhook.api.main._fetch_caller_phone_number_from_request",
         return_value="+1234567890",
     )
-    mocker.patch("twiliowebhook.api.main.retrieve_ssm_parameters")
+    mocker.patch("twiliowebhook.api.main.get_parameters_by_name")
     mocker.patch(
         "twiliowebhook.api.main.validate_http_twilio_signature",
         side_effect=exception(error_message),
@@ -370,8 +380,8 @@ def test_monitor_call_success(mocker: MockerFixture) -> None:
     call_sid = "CA1234567890abcdef1234567890abcdef"
 
     # Mock SSM parameters
-    mock_retrieve_ssm_parameters = mocker.patch(
-        "twiliowebhook.api.main.retrieve_ssm_parameters",
+    mock_get_parameters_by_name = mocker.patch(
+        "twiliowebhook.api.main.get_parameters_by_name",
         return_value={
             "/twh/dev/twilio-account-sid": "test-account-sid",
             "/twh/dev/twilio-auth-token": "test-token",
@@ -411,9 +421,13 @@ def test_monitor_call_success(mocker: MockerFixture) -> None:
     response = monitor_call(call_sid)
 
     # Verify SSM parameters were retrieved
-    mock_retrieve_ssm_parameters.assert_called_once_with(
-        "/twh/dev/twilio-account-sid",
-        "/twh/dev/twilio-auth-token",
+    mock_get_parameters_by_name.assert_called_once_with(
+        parameters={
+            "/twh/dev/twilio-account-sid": {},
+            "/twh/dev/twilio-auth-token": {},
+        },
+        decrypt=True,
+        raise_on_error=True,
     )
 
     # Verify Twilio client was initialized correctly
@@ -446,7 +460,7 @@ def test_monitor_call_not_found(mocker: MockerFixture) -> None:
 
     # Mock SSM parameters
     mocker.patch(
-        "twiliowebhook.api.main.retrieve_ssm_parameters",
+        "twiliowebhook.api.main.get_parameters_by_name",
         return_value={
             "/twh/dev/twilio-account-sid": "test-account-sid",
             "/twh/dev/twilio-auth-token": "test-token",
@@ -483,7 +497,7 @@ def test_monitor_call_twilio_error(mocker: MockerFixture) -> None:
 
     # Mock SSM parameters
     mocker.patch(
-        "twiliowebhook.api.main.retrieve_ssm_parameters",
+        "twiliowebhook.api.main.get_parameters_by_name",
         return_value={
             "/twh/dev/twilio-account-sid": "test-account-sid",
             "/twh/dev/twilio-auth-token": "test-token",
@@ -513,18 +527,18 @@ def test_monitor_call_twilio_error(mocker: MockerFixture) -> None:
 
 def test_monitor_call_ssm_error(mocker: MockerFixture) -> None:
     call_sid = "CA1234567890abcdef1234567890abcdef"
-    error_message = "SSM parameter not found"
+    error_detail = "SSM parameter not found"
 
-    # Mock SSM parameters to raise ValueError
+    # Mock SSM parameters to raise GetParameterError
     mocker.patch(
-        "twiliowebhook.api.main.retrieve_ssm_parameters",
-        side_effect=ValueError(error_message),
+        "twiliowebhook.api.main.get_parameters_by_name",
+        side_effect=GetParameterError(error_detail),
     )
 
     # Mock logger
     mock_logger_exception = mocker.patch("twiliowebhook.api.main.logger.exception")
 
-    msg = f"Invalid parameter configuration: {error_message}"
+    msg = f"Invalid parameter configuration: Invalid parameters: [{error_detail}]"
     with pytest.raises(InternalServerError, match=msg):
         monitor_call(call_sid)
 
@@ -546,7 +560,7 @@ def test_batch_monitor_calls_success(mocker: MockerFixture) -> None:
 
     # Mock SSM parameters
     mocker.patch(
-        "twiliowebhook.api.main.retrieve_ssm_parameters",
+        "twiliowebhook.api.main.get_parameters_by_name",
         return_value={
             "/twh/dev/twilio-account-sid": "test-account-sid",
             "/twh/dev/twilio-auth-token": "test-token",
@@ -622,7 +636,7 @@ def test_batch_monitor_calls_with_filters(mocker: MockerFixture) -> None:
 
     # Mock SSM parameters
     mocker.patch(
-        "twiliowebhook.api.main.retrieve_ssm_parameters",
+        "twiliowebhook.api.main.get_parameters_by_name",
         return_value={
             "/twh/dev/twilio-account-sid": "test-account-sid",
             "/twh/dev/twilio-auth-token": "test-token",
@@ -668,7 +682,7 @@ def test_batch_monitor_calls_with_pagination(mocker: MockerFixture) -> None:
 
     # Mock SSM parameters
     mocker.patch(
-        "twiliowebhook.api.main.retrieve_ssm_parameters",
+        "twiliowebhook.api.main.get_parameters_by_name",
         return_value={
             "/twh/dev/twilio-account-sid": "test-account-sid",
             "/twh/dev/twilio-auth-token": "test-token",
@@ -729,7 +743,7 @@ def test_batch_monitor_calls_invalid_date_format(mocker: MockerFixture) -> None:
 
     # Mock SSM parameters
     mocker.patch(
-        "twiliowebhook.api.main.retrieve_ssm_parameters",
+        "twiliowebhook.api.main.get_parameters_by_name",
         return_value={
             "/twh/dev/twilio-account-sid": "test-account-sid",
             "/twh/dev/twilio-auth-token": "test-token",
@@ -757,7 +771,7 @@ def test_batch_monitor_calls_invalid_date_range(mocker: MockerFixture) -> None:
 
     # Mock SSM parameters
     mocker.patch(
-        "twiliowebhook.api.main.retrieve_ssm_parameters",
+        "twiliowebhook.api.main.get_parameters_by_name",
         return_value={
             "/twh/dev/twilio-account-sid": "test-account-sid",
             "/twh/dev/twilio-auth-token": "test-token",
@@ -806,7 +820,7 @@ def test_batch_monitor_calls_twilio_error(mocker: MockerFixture) -> None:
 
     # Mock SSM parameters
     mocker.patch(
-        "twiliowebhook.api.main.retrieve_ssm_parameters",
+        "twiliowebhook.api.main.get_parameters_by_name",
         return_value={
             "/twh/dev/twilio-account-sid": "test-account-sid",
             "/twh/dev/twilio-auth-token": "test-token",
@@ -958,7 +972,7 @@ def test_monitor_call_general_exception(mocker: MockerFixture) -> None:
 
     # Mock SSM parameters to raise a general exception
     mocker.patch(
-        "twiliowebhook.api.main.retrieve_ssm_parameters",
+        "twiliowebhook.api.main.get_parameters_by_name",
         side_effect=Exception("Unexpected error"),
     )
 
@@ -987,7 +1001,7 @@ def test_batch_monitor_calls_general_exception(mocker: MockerFixture) -> None:
 
     # Mock SSM parameters to raise a general exception
     mocker.patch(
-        "twiliowebhook.api.main.retrieve_ssm_parameters",
+        "twiliowebhook.api.main.get_parameters_by_name",
         side_effect=Exception("Unexpected error"),
     )
 
@@ -1218,7 +1232,7 @@ def test_process_digits_success(mocker: MockerFixture) -> None:
 
     # Mock SSM parameters
     mocker.patch(
-        "twiliowebhook.api.main.retrieve_ssm_parameters",
+        "twiliowebhook.api.main.get_parameters_by_name",
         return_value={
             "/twh/dev/twilio-auth-token": "test-token",
             "/twh/dev/webhook-api-url": "https://webhook.example.com",
@@ -1265,7 +1279,7 @@ def test_confirm_digits_success_confirm(mocker: MockerFixture) -> None:
 
     # Mock SSM parameters
     mocker.patch(
-        "twiliowebhook.api.main.retrieve_ssm_parameters",
+        "twiliowebhook.api.main.get_parameters_by_name",
         return_value={
             "/twh/dev/twilio-auth-token": "test-token",
             "/twh/dev/webhook-api-url": "https://webhook.example.com",
@@ -1307,7 +1321,7 @@ def test_confirm_digits_success_reenter(mocker: MockerFixture) -> None:
 
     # Mock SSM parameters
     mocker.patch(
-        "twiliowebhook.api.main.retrieve_ssm_parameters",
+        "twiliowebhook.api.main.get_parameters_by_name",
         return_value={
             "/twh/dev/twilio-auth-token": "test-token",
             "/twh/dev/webhook-api-url": "https://webhook.example.com",
@@ -1347,7 +1361,7 @@ def test_confirm_digits_invalid_input(mocker: MockerFixture) -> None:
 
     # Mock SSM parameters
     mocker.patch(
-        "twiliowebhook.api.main.retrieve_ssm_parameters",
+        "twiliowebhook.api.main.get_parameters_by_name",
         return_value={
             "/twh/dev/twilio-auth-token": "test-token",
             "/twh/dev/webhook-api-url": "https://webhook.example.com",
@@ -1389,18 +1403,20 @@ def test_confirm_digits_ssm_error(mocker: MockerFixture) -> None:
     mock_event = {"queryStringParameters": {"digits": "1", "birthdate": "20240101"}}
     mocker.patch("twiliowebhook.api.main.app.current_event", new=mock_event)
 
-    # Mock SSM to raise ValueError (which gets caught by general Exception handler)
+    error_detail = "Invalid parameter"
+    error_message = f"Invalid parameters: [{error_detail}]"
+    # Mock SSM to raise GetParameterError (which gets wrapped into ValueError)
     mocker.patch(
-        "twiliowebhook.api.main.retrieve_ssm_parameters",
-        side_effect=ValueError("Invalid parameter"),
+        "twiliowebhook.api.main.get_parameters_by_name",
+        side_effect=GetParameterError(error_detail),
     )
 
     mock_logger_exception = mocker.patch("twiliowebhook.api.main.logger.exception")
 
-    with pytest.raises(InternalServerError, match="Invalid parameter"):
+    with pytest.raises(InternalServerError, match=error_message):
         confirm_digits("birthdate")
 
-    mock_logger_exception.assert_called_once_with("Invalid parameter")
+    mock_logger_exception.assert_called_once_with(error_message)
 
 
 def test_confirm_digits_signature_validation_error(mocker: MockerFixture) -> None:
@@ -1411,7 +1427,7 @@ def test_confirm_digits_signature_validation_error(mocker: MockerFixture) -> Non
 
     # Mock SSM parameters
     mocker.patch(
-        "twiliowebhook.api.main.retrieve_ssm_parameters",
+        "twiliowebhook.api.main.get_parameters_by_name",
         return_value={
             "/twh/dev/twilio-auth-token": "fake_token",
             "/twh/dev/webhook-api-url": "https://webhook.example.com",
@@ -1440,7 +1456,7 @@ def test_confirm_digits_xml_processing_error(mocker: MockerFixture) -> None:
 
     # Mock SSM parameters
     mocker.patch(
-        "twiliowebhook.api.main.retrieve_ssm_parameters",
+        "twiliowebhook.api.main.get_parameters_by_name",
         return_value={
             "/twh/dev/twilio-auth-token": "fake_token",
             "/twh/dev/webhook-api-url": "https://webhook.example.com",

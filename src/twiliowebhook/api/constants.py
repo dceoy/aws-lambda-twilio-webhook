@@ -63,9 +63,6 @@ URL_QUERY_SEPARATOR = "?"
 FORM_PARAM_DIGITS = "Digits"
 FORM_PARAM_FROM = "From"
 
-# AWS Service Names
-AWS_SSM_SERVICE = "ssm"
-
 # Error Messages
 ERROR_DIGITS_NOT_FOUND = "Digits not found in the request body"
 ERROR_BIRTHDATE_DIGITS_NOT_FOUND = "Birth date digits not found in the request"
